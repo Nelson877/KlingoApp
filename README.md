@@ -35,7 +35,7 @@ KLINGO is a mobile application that connects users with professional, trained cl
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/yourusername/klingo-app.git
+   [git clone https://github.com/yourusername/klingo-app.git](https://github.com/Nelson877/KlingoApp.git)
    cd klingo-app
    ```
 
