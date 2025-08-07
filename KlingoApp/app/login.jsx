@@ -1,134 +1,205 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, Image, KeyboardAvoidingView, Platform } from 'react-native';
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  Image,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 
-function Login({ onLogin }) {
+// Login Component
+function Login({ onLogin = () => {}, onNavigateToSignup = () => {}, onNavigateToForgotPassword = () => {} }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [errors, setErrors] = useState({});
+
+  const validateForm = () => {
+    const newErrors = {};
+    
+    if (!email.trim()) {
+      newErrors.email = "Email is required";
+    } else if (!/\S+@\S+\.\S+/.test(email)) {
+      newErrors.email = "Email is invalid";
+    }
+    
+    if (!password) {
+      newErrors.password = "Password is required";
+    }
+    
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const handleLogin = () => {
+    if (validateForm()) {
+      onLogin({ email, password });
+    }
+  };
+
+  const renderInput = (label, value, onChangeText, placeholder, options = {}) => (
+    <View className="mb-5">
+      <Text className="text-sm font-semibold text-gray-700 mb-2">
+        {label}
+      </Text>
+      <View className={`bg-gray-50 rounded-xl px-4 py-4 border flex-row items-center ${
+        errors[options.errorKey] ? 'border-red-500' : 'border-gray-200'
+      }`}>
+        <TextInput
+          className="flex-1 text-base text-gray-800"
+          placeholder={placeholder}
+          placeholderTextColor="#9CA3AF"
+          value={value}
+          onChangeText={onChangeText}
+          {...options}
+        />
+        {options.showToggle && (
+          <TouchableOpacity
+            onPress={options.onToggle}
+            className="ml-3"
+          >
+            <Ionicons 
+              name={options.isVisible ? "eye-off" : "eye"} 
+              size={20} 
+              color="#10B981" 
+            />
+          </TouchableOpacity>
+        )}
+      </View>
+      {errors[options.errorKey] && (
+        <Text className="text-red-500 text-xs mt-1">
+          {errors[options.errorKey]}
+        </Text>
+      )}
+    </View>
+  );
 
   return (
-    <KeyboardAvoidingView 
-      className="flex-1 bg-white" 
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    <KeyboardAvoidingView
+      className="flex-1 bg-white"
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
-      <View className="flex-1 px-8 py-12">
-        
-        {/* Header with Logo */}
-        <View className="items-center mt-8 mb-12">
-          <Image
-            source={require("../assets/images/klingo-logo.png")}
-            className="w-32 h-32 mb-4"
-            resizeMode="contain"
-          />
-          <Text className="text-3xl font-bold text-gray-800 mb-2">
-            Welcome Back
-          </Text>
-          <Text className="text-lg text-gray-600 text-center">
-            Sign in to continue to KLINGO
-          </Text>
-        </View>
-
-        {/* Login Form */}
-        <View className="flex-1 justify-center">
-          
-          {/* Email Input */}
-          <View className="mb-6">
-            <Text className="text-sm font-medium text-gray-700 mb-2">
-              Email Address
-            </Text>
-            <View className="bg-gray-50 rounded-xl px-4 py-4 border border-gray-200">
-              <TextInput
-                className="text-base text-gray-800"
-                placeholder="Enter your email"
-                placeholderTextColor="#9CA3AF"
-                value={email}
-                onChangeText={setEmail}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                autoComplete="email"
+      <ScrollView 
+        className="flex-1"
+        contentContainerStyle={{ flexGrow: 1 }}
+        showsVerticalScrollIndicator={false}
+      >
+        <View className="flex-1 px-6 pt-12">
+          {/* Header with Logo */}
+          <View className="items-center mb-10">
+            <View className="mb-6">
+              <Image
+                source={require("../assets/images/klingo-logo.png")}
+                className="w-20 h-20"
+                resizeMode="contain"
               />
             </View>
+            <Text className="text-3xl font-bold text-gray-900 mb-2">
+              Welcome Back
+            </Text>
+            <Text className="text-base text-gray-600 text-center">
+              Sign in to continue to Klingo
+            </Text>
           </View>
 
-          {/* Password Input */}
-          <View className="mb-8">
-            <Text className="text-sm font-medium text-gray-700 mb-2">
-              Password
-            </Text>
-            <View className="bg-gray-50 rounded-xl px-4 py-4 border border-gray-200 flex-row items-center">
-              <TextInput
-                className="flex-1 text-base text-gray-800"
-                placeholder="Enter your password"
-                placeholderTextColor="#9CA3AF"
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry={!showPassword}
-                autoComplete="password"
-              />
-              <TouchableOpacity 
-                onPress={() => setShowPassword(!showPassword)}
-                className="ml-3"
-              >
-                <Text className="text-sm text-green-600 font-medium">
-                  {showPassword ? 'Hide' : 'Show'}
+          {/* Login Form */}
+          <View className="flex-1 justify-center">
+            {renderInput(
+              "Email Address",
+              email,
+              setEmail,
+              "Enter your email address",
+              {
+                keyboardType: 'email-address',
+                autoCapitalize: 'none',
+                autoComplete: 'email',
+                errorKey: 'email'
+              }
+            )}
+
+            {renderInput(
+              "Password",
+              password,
+              setPassword,
+              "Enter your password",
+              {
+                secureTextEntry: !showPassword,
+                autoComplete: 'password',
+                showToggle: true,
+                isVisible: showPassword,
+                onToggle: () => setShowPassword(!showPassword),
+                errorKey: 'password'
+              }
+            )}
+
+            {/* Forgot Password */}
+            <TouchableOpacity 
+              className="self-end mb-6"
+              onPress={onNavigateToForgotPassword}
+            >
+              <Text className="text-sm text-green-600 font-medium">
+                Forgot Password?
+              </Text>
+            </TouchableOpacity>
+
+            {/* Login Button */}
+            <TouchableOpacity
+              className="bg-green-600 rounded-xl py-4 mb-6 shadow-lg"
+              onPress={handleLogin}
+              activeOpacity={0.8}
+            >
+              <Text className="text-white text-lg font-semibold text-center">
+                Sign In
+              </Text>
+            </TouchableOpacity>
+
+            {/* Divider */}
+            <View className="flex-row items-center mb-6">
+              <View className="flex-1 h-px bg-gray-300" />
+              <Text className="px-4 text-sm text-gray-500">
+                or continue with
+              </Text>
+              <View className="flex-1 h-px bg-gray-300" />
+            </View>
+
+            {/* Social Login Options */}
+            <View className="flex-row gap-3 mb-8">
+              <TouchableOpacity className="flex-1 bg-white border border-gray-300 rounded-xl py-3 px-4 flex-row items-center justify-center shadow-sm">
+                <Ionicons name="logo-google" size={20} color="#DB4437" />
+                <Text className="text-base font-medium text-gray-700 ml-2">
+                  Google
+                </Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity className="flex-1 bg-white border border-gray-300 rounded-xl py-3 px-4 flex-row items-center justify-center shadow-sm">
+                <Ionicons name="logo-apple" size={20} color="#000" />
+                <Text className="text-base font-medium text-gray-700 ml-2">
+                  Apple
                 </Text>
               </TouchableOpacity>
             </View>
           </View>
 
-          {/* Forgot Password */}
-          <TouchableOpacity className="self-end mb-8">
-            <Text className="text-sm text-green-600 font-medium">
-              Forgot Password?
+          {/* Sign Up Link */}
+          <View className="flex-row justify-center items-center mb-20">
+            <Text className="text-base text-gray-600">
+              Don't have an account?
             </Text>
-          </TouchableOpacity>
-
-          {/* Login Button */}
-          <TouchableOpacity 
-            className="bg-green-600 rounded-xl py-4 px-8 mb-6"
-            onPress={onLogin}
-          >
-            <Text className="text-white text-lg font-semibold text-center">
-              Sign In
-            </Text>
-          </TouchableOpacity>
-
-          {/* Divider */}
-          <View className="flex-row items-center mb-6">
-            <View className="flex-1 h-px bg-gray-300" />
-            <Text className="px-4 text-sm text-gray-500">or</Text>
-            <View className="flex-1 h-px bg-gray-300" />
-          </View>
-
-          {/* Social Login Options */}
-          <View className="flex-row space-x-4 mb-8">
-            <TouchableOpacity className="flex-1 bg-white border border-gray-300 rounded-xl py-3 px-4 flex-row items-center justify-center">
-              <Text className="text-base font-medium text-gray-700 ml-2">
-                Google
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity className="flex-1 bg-white border border-gray-300 rounded-xl py-3 px-4 flex-row items-center justify-center">
-              <Text className="text-base font-medium text-gray-700 ml-2">
-                Apple
+            <TouchableOpacity 
+              className="ml-1" 
+              onPress={onNavigateToSignup}
+            >
+              <Text className="text-base text-green-600 font-semibold">
+                Sign Up
               </Text>
             </TouchableOpacity>
           </View>
-
         </View>
-
-        {/* Sign Up Link */}
-        <View className="flex-row justify-center items-center pb-8">
-          <Text className="text-base text-gray-600">
-            Don't have an account? 
-          </Text>
-          <TouchableOpacity className="ml-1">
-            <Text className="text-base text-green-600 font-semibold">
-              Sign Up
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-      </View>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 }
