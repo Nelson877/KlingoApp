@@ -20,7 +20,7 @@ function LoadingScreen({ message = "Loading..." }) {
     <View className="flex-1 bg-white items-center justify-center">
       <View className="items-center">
         {/* Loading Spinner with Green Color */}
-        <ActivityIndicator size="large" color="#10B981" />
+        <ActivityIndicator size="large" color="#16a34a"/>
         
         {/* Loading Icon Animation */}
         <View className="mt-4 mb-6">

@@ -22,6 +22,13 @@ function RequestCleanup({ onBack = () => {}, onSubmitRequest = () => {} }) {
     contactInfo: {
       phone: "",
     },
+    // New fields for "other" option
+    otherDetails: {
+      customProblemType: "",
+      preferredDate: "",
+      preferredTime: "",
+      specificLocation: "",
+    },
   });
   const [errors, setErrors] = useState({});
 
@@ -91,8 +98,21 @@ function RequestCleanup({ onBack = () => {}, onSubmitRequest = () => {} }) {
     if (step === 1) {
       if (!formData.problemType)
         newErrors.problemType = "Please select a problem type";
-      if (!formData.location.trim())
-        newErrors.location = "Location is required";
+      
+      // Special validation for "other" option
+      if (formData.problemType === "other") {
+        if (!formData.otherDetails.customProblemType.trim())
+          newErrors.customProblemType = "Please specify the type of problem";
+        if (!formData.otherDetails.preferredDate)
+          newErrors.preferredDate = "Please select a preferred date";
+        if (!formData.otherDetails.preferredTime)
+          newErrors.preferredTime = "Please select a preferred time";
+        if (!formData.otherDetails.specificLocation.trim())
+          newErrors.specificLocation = "Please provide specific location details";
+      } else {
+        if (!formData.location.trim())
+          newErrors.location = "Location is required";
+      }
     }
 
     if (step === 2) {
@@ -103,8 +123,6 @@ function RequestCleanup({ onBack = () => {}, onSubmitRequest = () => {} }) {
     }
 
     if (step === 3) {
-      if (!formData.contactInfo.name.trim())
-        newErrors.name = "Name is required";
       if (!formData.contactInfo.phone.trim())
         newErrors.phone = "Phone number is required";
     }
@@ -152,7 +170,45 @@ function RequestCleanup({ onBack = () => {}, onSubmitRequest = () => {} }) {
   const getCurrentLocation = () => {
     // Placeholder for GPS functionality
     Alert.alert("Location", "GPS location would be fetched here");
-    setFormData({ ...formData, location: "Current GPS Location" });
+    if (formData.problemType === "other") {
+      setFormData({
+        ...formData,
+        otherDetails: {
+          ...formData.otherDetails,
+          specificLocation: "Current GPS Location"
+        }
+      });
+    } else {
+      setFormData({ ...formData, location: "Current GPS Location" });
+    }
+  };
+
+  const showDatePicker = () => {
+    // Placeholder for date picker
+    const today = new Date();
+    const dateString = today.toLocaleDateString();
+    setFormData({
+      ...formData,
+      otherDetails: {
+        ...formData.otherDetails,
+        preferredDate: dateString
+      }
+    });
+    Alert.alert("Date Picker", `Date selected: ${dateString}`);
+  };
+
+  const showTimePicker = () => {
+    // Placeholder for time picker
+    const now = new Date();
+    const timeString = now.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+    setFormData({
+      ...formData,
+      otherDetails: {
+        ...formData.otherDetails,
+        preferredTime: timeString
+      }
+    });
+    Alert.alert("Time Picker", `Time selected: ${timeString}`);
   };
 
   const renderProgressSteps = () => (
@@ -184,6 +240,132 @@ function RequestCleanup({ onBack = () => {}, onSubmitRequest = () => {} }) {
     </View>
   );
 
+  const renderOtherFields = () => (
+    <View className="mt-6">
+      {/* Custom Problem Type */}
+      <Text className='text-lg font-semibold text-gray-800 mb-4'>
+        Specify Problem Type
+      </Text>
+      <View
+        className={`bg-gray-50 rounded-xl px-4 py-4 border mb-4 ${
+          errors.customProblemType ? "border-red-500" : "border-gray-200"
+        }`}
+      >
+        <TextInput
+          className='text-base text-gray-800'
+          placeholder='What type of cleaning service do you need?'
+          placeholderTextColor='#9CA3AF'
+          value={formData.otherDetails.customProblemType}
+          onChangeText={(text) =>
+            setFormData({
+              ...formData,
+              otherDetails: {
+                ...formData.otherDetails,
+                customProblemType: text
+              }
+            })
+          }
+        />
+      </View>
+      {errors.customProblemType && (
+        <Text className='text-red-500 text-sm mb-4'>{errors.customProblemType}</Text>
+      )}
+
+      {/* Specific Location */}
+      <Text className='text-lg font-semibold text-gray-800 mb-4'>
+        Specific Location Details
+      </Text>
+      <View
+        className={`bg-gray-50 rounded-xl px-4 py-4 border mb-4 ${
+          errors.specificLocation ? "border-red-500" : "border-gray-200"
+        }`}
+      >
+        <TextInput
+          className='text-base text-gray-800'
+          placeholder='Provide detailed location information'
+          placeholderTextColor='#9CA3AF'
+          value={formData.otherDetails.specificLocation}
+          onChangeText={(text) =>
+            setFormData({
+              ...formData,
+              otherDetails: {
+                ...formData.otherDetails,
+                specificLocation: text
+              }
+            })
+          }
+          multiline
+        />
+      </View>
+      {errors.specificLocation && (
+        <Text className='text-red-500 text-sm mb-4'>{errors.specificLocation}</Text>
+      )}
+
+      <TouchableOpacity
+        className='bg-green-100 border border-green-300 rounded-xl py-3 px-4 flex-row items-center justify-center mb-6'
+        onPress={getCurrentLocation}
+      >
+        <Ionicons name='location-outline' size={20} color='#10B981' />
+        <Text className='text-green-700 font-medium ml-2'>
+          Use Current Location
+        </Text>
+      </TouchableOpacity>
+
+      {/* Date and Time Selection */}
+      <Text className='text-lg font-semibold text-gray-800 mb-4'>
+        Preferred Schedule
+      </Text>
+      
+      <View className="flex-row gap-3 mb-4">
+        {/* Date Picker */}
+        <View className="flex-1">
+          <Text className='text-sm font-medium text-gray-700 mb-2'>
+            Preferred Date
+          </Text>
+          <TouchableOpacity
+            className={`bg-gray-50 rounded-xl px-4 py-4 border flex-row items-center justify-between ${
+              errors.preferredDate ? "border-red-500" : "border-gray-200"
+            }`}
+            onPress={showDatePicker}
+          >
+            <Text className={`text-base ${
+              formData.otherDetails.preferredDate ? "text-gray-800" : "text-gray-400"
+            }`}>
+              {formData.otherDetails.preferredDate || "Select Date"}
+            </Text>
+            <Ionicons name='calendar-outline' size={20} color='#6B7280' />
+          </TouchableOpacity>
+          {errors.preferredDate && (
+            <Text className='text-red-500 text-sm mt-1'>{errors.preferredDate}</Text>
+          )}
+        </View>
+
+        {/* Time Picker */}
+        <View className="flex-1">
+          <Text className='text-sm font-medium text-gray-700 mb-2'>
+            Preferred Time
+          </Text>
+          <TouchableOpacity
+            className={`bg-gray-50 rounded-xl px-4 py-4 border flex-row items-center justify-between ${
+              errors.preferredTime ? "border-red-500" : "border-gray-200"
+            }`}
+            onPress={showTimePicker}
+          >
+            <Text className={`text-base ${
+              formData.otherDetails.preferredTime ? "text-gray-800" : "text-gray-400"
+            }`}>
+              {formData.otherDetails.preferredTime || "Select Time"}
+            </Text>
+            <Ionicons name='time-outline' size={20} color='#6B7280' />
+          </TouchableOpacity>
+          {errors.preferredTime && (
+            <Text className='text-red-500 text-sm mt-1'>{errors.preferredTime}</Text>
+          )}
+        </View>
+      </View>
+    </View>
+  );
+
   const renderStep1 = () => (
     <View>
       <Text className='text-2xl font-bold text-gray-900 mb-2'>
@@ -206,7 +388,13 @@ function RequestCleanup({ onBack = () => {}, onSubmitRequest = () => {} }) {
                 ? "border-green-500 bg-green-50"
                 : "border-gray-200 bg-white"
             }`}
-            onPress={() => setFormData({ ...formData, problemType: type.id })}
+            onPress={() => {
+              setFormData({ ...formData, problemType: type.id });
+              // Clear errors when selection changes
+              if (errors.problemType) {
+                setErrors({ ...errors, problemType: null });
+              }
+            }}
           >
             <Ionicons
               name={type.icon}
@@ -229,41 +417,48 @@ function RequestCleanup({ onBack = () => {}, onSubmitRequest = () => {} }) {
         <Text className='text-red-500 text-sm mb-4'>{errors.problemType}</Text>
       )}
 
-      {/* Location Input */}
-      <Text className='text-lg font-semibold text-gray-800 mb-4'>Location</Text>
-      <View className='mb-4'>
-        <View
-          className={`bg-gray-50 rounded-xl px-4 py-4 border ${
-            errors.location ? "border-red-500" : "border-gray-200"
-          }`}
-        >
-          <TextInput
-            className='text-base text-gray-800'
-            placeholder='Enter address or description of location'
-            placeholderTextColor='#9CA3AF'
-            value={formData.location}
-            onChangeText={(text) =>
-              setFormData({ ...formData, location: text })
-            }
-            multiline
-          />
+      {/* Show different content based on selection */}
+      {formData.problemType === "other" ? (
+        renderOtherFields()
+      ) : (
+        <View>
+          {/* Standard Location Input */}
+          <Text className='text-lg font-semibold text-gray-800 mb-4'>Location</Text>
+          <View className='mb-4'>
+            <View
+              className={`bg-gray-50 rounded-xl px-4 py-4 border ${
+                errors.location ? "border-red-500" : "border-gray-200"
+              }`}
+            >
+              <TextInput
+                className='text-base text-gray-800'
+                placeholder='Enter address or description of location'
+                placeholderTextColor='#9CA3AF'
+                value={formData.location}
+                onChangeText={(text) =>
+                  setFormData({ ...formData, location: text })
+                }
+                multiline
+              />
+            </View>
+            {errors.location && (
+              <Text className='text-red-500 text-sm mt-1'>{errors.location}</Text>
+            )}
+          </View>
+
+          <TouchableOpacity
+            className='bg-green-100 border border-green-300 rounded-xl py-3 px-4 flex-row items-center justify-center mb-6'
+            onPress={getCurrentLocation}
+          >
+            <Ionicons name='location-outline' size={20} color='#10B981' />
+            <Text className='text-green-700 font-medium ml-2'>
+              Use Current Location
+            </Text>
+          </TouchableOpacity>
         </View>
-        {errors.location && (
-          <Text className='text-red-500 text-sm mt-1'>{errors.location}</Text>
-        )}
-      </View>
+      )}
 
-      <TouchableOpacity
-        className='bg-green-100 border border-green-300 rounded-xl py-3 px-4 flex-row items-center justify-center mb-6'
-        onPress={getCurrentLocation}
-      >
-        <Ionicons name='location-outline' size={20} color='#10B981' />
-        <Text className='text-green-700 font-medium ml-2'>
-          Use Current Location
-        </Text>
-      </TouchableOpacity>
-
-      {/* Photo Section */}
+      {/* Photo Section - Always visible */}
       <Text className='text-lg font-semibold text-gray-800 mb-4'>
         Add Photos (Optional)
       </Text>
@@ -416,15 +611,29 @@ function RequestCleanup({ onBack = () => {}, onSubmitRequest = () => {} }) {
         </Text>
         <Text className='text-green-700 text-sm'>
           Problem:{" "}
-          {problemTypes.find((p) => p.id === formData.problemType)?.label}
+          {formData.problemType === "other" 
+            ? formData.otherDetails.customProblemType 
+            : problemTypes.find((p) => p.id === formData.problemType)?.label}
         </Text>
         <Text className='text-green-700 text-sm'>
           Priority:{" "}
           {severityLevels.find((s) => s.id === formData.severity)?.label}
         </Text>
         <Text className='text-green-700 text-sm'>
-          Location: {formData.location}
+          Location: {formData.problemType === "other" 
+            ? formData.otherDetails.specificLocation 
+            : formData.location}
         </Text>
+        {formData.problemType === "other" && (
+          <>
+            <Text className='text-green-700 text-sm'>
+              Preferred Date: {formData.otherDetails.preferredDate}
+            </Text>
+            <Text className='text-green-700 text-sm'>
+              Preferred Time: {formData.otherDetails.preferredTime}
+            </Text>
+          </>
+        )}
       </View>
     </View>
   );
