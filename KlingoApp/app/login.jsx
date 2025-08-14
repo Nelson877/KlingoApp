@@ -8,8 +8,12 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import ApiService from '../services/apiService';
 
 // Login Component
 function Login({ onLogin = () => {}, onNavigateToSignup = () => {}, onNavigateToForgotPassword = () => {} }) {
@@ -17,6 +21,7 @@ function Login({ onLogin = () => {}, onNavigateToSignup = () => {}, onNavigateTo
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [errors, setErrors] = useState({});
+  const [loading, setLoading] = useState(false);
 
   const validateForm = () => {
     const newErrors = {};
@@ -35,9 +40,56 @@ function Login({ onLogin = () => {}, onNavigateToSignup = () => {}, onNavigateTo
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleLogin = () => {
-    if (validateForm()) {
-      onLogin({ email, password });
+  const handleLogin = async () => {
+    if (!validateForm()) {
+      return;
+    }
+
+    setLoading(true);
+    setErrors({});
+
+    try {
+      const credentials = {
+        email: email.toLowerCase().trim(),
+        password,
+      };
+
+      const response = await ApiService.login(credentials);
+
+      if (response.token) {
+        // Store token and user data
+        await AsyncStorage.setItem('userToken', response.token);
+        await AsyncStorage.setItem('userData', JSON.stringify(response.user));
+
+        Alert.alert(
+          "Welcome Back!",
+          "You have successfully logged in.",
+          [
+            {
+              text: "OK",
+              onPress: () => onLogin(response.user),
+            },
+          ]
+        );
+      }
+    } catch (error) {
+      console.error('Login error:', error);
+      
+      let errorMessage = "Login failed. Please try again.";
+      
+      if (error.message.includes('Invalid email or password')) {
+        errorMessage = "Invalid email or password. Please check your credentials.";
+        setErrors({ 
+          email: "Please check your email and password",
+          password: "Please check your email and password"
+        });
+      } else if (error.message.includes('network') || error.message.includes('fetch')) {
+        errorMessage = "Network error. Please check your internet connection.";
+      }
+
+      Alert.alert("Login Failed", errorMessage);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -55,17 +107,19 @@ function Login({ onLogin = () => {}, onNavigateToSignup = () => {}, onNavigateTo
           placeholderTextColor="#9CA3AF"
           value={value}
           onChangeText={onChangeText}
+          editable={!loading}
           {...options}
         />
         {options.showToggle && (
           <TouchableOpacity
             onPress={options.onToggle}
             className="ml-3"
+            disabled={loading}
           >
             <Ionicons 
               name={options.isVisible ? "eye-off" : "eye"} 
               size={20} 
-              color="#10B981" 
+              color={loading ? "#9CA3AF" : "#10B981"} 
             />
           </TouchableOpacity>
         )}
@@ -140,6 +194,7 @@ function Login({ onLogin = () => {}, onNavigateToSignup = () => {}, onNavigateTo
             <TouchableOpacity 
               className="self-end mb-6"
               onPress={onNavigateToForgotPassword}
+              disabled={loading}
             >
               <Text className="text-sm text-green-600 font-medium">
                 Forgot Password?
@@ -148,13 +203,25 @@ function Login({ onLogin = () => {}, onNavigateToSignup = () => {}, onNavigateTo
 
             {/* Login Button */}
             <TouchableOpacity
-              className="bg-green-600 rounded-xl py-4 mb-6 shadow-lg"
+              className={`bg-green-600 rounded-xl py-4 mb-6 shadow-lg ${
+                loading ? 'opacity-50' : ''
+              }`}
               onPress={handleLogin}
               activeOpacity={0.8}
+              disabled={loading}
             >
-              <Text className="text-white text-lg font-semibold text-center">
-                Sign In
-              </Text>
+              {loading ? (
+                <View className="flex-row items-center justify-center">
+                  <ActivityIndicator size="small" color="white" />
+                  <Text className="text-white text-lg font-semibold ml-2">
+                    Signing In...
+                  </Text>
+                </View>
+              ) : (
+                <Text className="text-white text-lg font-semibold text-center">
+                  Sign In
+                </Text>
+              )}
             </TouchableOpacity>
 
             {/* Divider */}
@@ -168,14 +235,20 @@ function Login({ onLogin = () => {}, onNavigateToSignup = () => {}, onNavigateTo
 
             {/* Social Login Options */}
             <View className="flex-row gap-3 mb-8">
-              <TouchableOpacity className="flex-1 bg-white border border-gray-300 rounded-xl py-3 px-4 flex-row items-center justify-center shadow-sm">
+              <TouchableOpacity 
+                className="flex-1 bg-white border border-gray-300 rounded-xl py-3 px-4 flex-row items-center justify-center shadow-sm"
+                disabled={loading}
+              >
                 <Ionicons name="logo-google" size={20} color="#DB4437" />
                 <Text className="text-base font-medium text-gray-700 ml-2">
                   Google
                 </Text>
               </TouchableOpacity>
               
-              <TouchableOpacity className="flex-1 bg-white border border-gray-300 rounded-xl py-3 px-4 flex-row items-center justify-center shadow-sm">
+              <TouchableOpacity 
+                className="flex-1 bg-white border border-gray-300 rounded-xl py-3 px-4 flex-row items-center justify-center shadow-sm"
+                disabled={loading}
+              >
                 <Ionicons name="logo-apple" size={20} color="#000" />
                 <Text className="text-base font-medium text-gray-700 ml-2">
                   Apple
@@ -192,6 +265,7 @@ function Login({ onLogin = () => {}, onNavigateToSignup = () => {}, onNavigateTo
             <TouchableOpacity 
               className="ml-1" 
               onPress={onNavigateToSignup}
+              disabled={loading}
             >
               <Text className="text-base text-green-600 font-semibold">
                 Sign Up

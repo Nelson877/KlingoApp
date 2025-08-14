@@ -8,8 +8,12 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Alert,
+  ActivityIndicator,
 } from "react-native";
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import ApiService from '../services/apiService';
 
 // Sign Up Component
 function SignUp({ onSignUp = () => {}, onNavigateToLogin = () => {} }) {
@@ -20,6 +24,7 @@ function SignUp({ onSignUp = () => {}, onNavigateToLogin = () => {} }) {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [errors, setErrors] = useState({});
+  const [loading, setLoading] = useState(false);
 
   const validateForm = () => {
     const newErrors = {};
@@ -50,9 +55,58 @@ function SignUp({ onSignUp = () => {}, onNavigateToLogin = () => {} }) {
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSignUp = () => {
-    if (validateForm()) {
-      onSignUp({ fullName, email, password });
+  const handleSignUp = async () => {
+    if (!validateForm()) {
+      return;
+    }
+
+    setLoading(true);
+    setErrors({});
+
+    try {
+      // Get device info
+      const deviceInfo = Platform.OS === 'ios' ? 'iPhone' : 'Android';
+      
+      const userData = {
+        fullName: fullName.trim(),
+        email: email.toLowerCase().trim(),
+        password,
+        deviceInfo,
+      };
+
+      const response = await ApiService.register(userData);
+
+      if (response.token) {
+        // Store token and user data
+        await AsyncStorage.setItem('userToken', response.token);
+        await AsyncStorage.setItem('userData', JSON.stringify(response.user));
+
+        Alert.alert(
+          "Success",
+          "Account created successfully! Welcome to Klingo!",
+          [
+            {
+              text: "OK",
+              onPress: () => onSignUp(response.user),
+            },
+          ]
+        );
+      }
+    } catch (error) {
+      console.error('Registration error:', error);
+      
+      let errorMessage = "Registration failed. Please try again.";
+      
+      if (error.message.includes('already exists')) {
+        errorMessage = "An account with this email already exists.";
+        setErrors({ email: "This email is already registered" });
+      } else if (error.message.includes('network') || error.message.includes('fetch')) {
+        errorMessage = "Network error. Please check your internet connection.";
+      }
+
+      Alert.alert("Registration Failed", errorMessage);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -70,17 +124,19 @@ function SignUp({ onSignUp = () => {}, onNavigateToLogin = () => {} }) {
           placeholderTextColor="#9CA3AF"
           value={value}
           onChangeText={onChangeText}
+          editable={!loading}
           {...options}
         />
         {options.showToggle && (
           <TouchableOpacity
             onPress={options.onToggle}
             className="ml-3"
+            disabled={loading}
           >
             <Ionicons 
               name={options.isVisible ? "eye-off" : "eye"} 
               size={20} 
-              color="#10B981" 
+              color={loading ? "#9CA3AF" : "#10B981"} 
             />
           </TouchableOpacity>
         )}
@@ -180,13 +236,25 @@ function SignUp({ onSignUp = () => {}, onNavigateToLogin = () => {} }) {
 
             {/* Sign Up Button */}
             <TouchableOpacity
-              className="bg-green-600 rounded-xl py-4 mb-6 shadow-lg"
+              className={`bg-green-600 rounded-xl py-4 mb-6 shadow-lg ${
+                loading ? 'opacity-50' : ''
+              }`}
               onPress={handleSignUp}
               activeOpacity={0.8}
+              disabled={loading}
             >
-              <Text className="text-white text-lg font-semibold text-center">
-                Create Account
-              </Text>
+              {loading ? (
+                <View className="flex-row items-center justify-center">
+                  <ActivityIndicator size="small" color="white" />
+                  <Text className="text-white text-lg font-semibold ml-2">
+                    Creating Account...
+                  </Text>
+                </View>
+              ) : (
+                <Text className="text-white text-lg font-semibold text-center">
+                  Create Account
+                </Text>
+              )}
             </TouchableOpacity>
 
             {/* Divider */}
@@ -200,14 +268,20 @@ function SignUp({ onSignUp = () => {}, onNavigateToLogin = () => {} }) {
 
             {/* Social Sign Up Options */}
             <View className="flex-row gap-3 mb-8">
-              <TouchableOpacity className="flex-1 bg-white border border-gray-300 rounded-xl py-3 px-4 flex-row items-center justify-center shadow-sm">
+              <TouchableOpacity 
+                className="flex-1 bg-white border border-gray-300 rounded-xl py-3 px-4 flex-row items-center justify-center shadow-sm"
+                disabled={loading}
+              >
                 <Ionicons name="logo-google" size={20} color="#DB4437" />
                 <Text className="text-base font-medium text-gray-700 ml-2">
                   Google
                 </Text>
               </TouchableOpacity>
               
-              <TouchableOpacity className="flex-1 bg-white border border-gray-300 rounded-xl py-3 px-4 flex-row items-center justify-center shadow-sm">
+              <TouchableOpacity 
+                className="flex-1 bg-white border border-gray-300 rounded-xl py-3 px-4 flex-row items-center justify-center shadow-sm"
+                disabled={loading}
+              >
                 <Ionicons name="logo-apple" size={20} color="#000" />
                 <Text className="text-base font-medium text-gray-700 ml-2">
                   Apple
@@ -224,6 +298,7 @@ function SignUp({ onSignUp = () => {}, onNavigateToLogin = () => {} }) {
             <TouchableOpacity 
               className="ml-1" 
               onPress={onNavigateToLogin}
+              disabled={loading}
             >
               <Text className="text-base text-green-600 font-semibold">
                 Sign In
