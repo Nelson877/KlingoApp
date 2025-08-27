@@ -3,6 +3,8 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
+const nodemailer = require('nodemailer');
 require('dotenv').config();
 
 const app = express();
@@ -13,12 +15,15 @@ app.use(cors());
 app.use(express.json());
 
 // MongoDB Connection
-mongoose.connect(process.env.MONGODB_URI || 'mongodb+srv://dziknel123:9FfOpTnnFvTuZqHU@cluster0.jwsdzjl.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0', {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
+mongoose.connect(process.env.MONGODB_URI, {
+  // Removed deprecated options
+}).then(() => {
+  console.log('MongoDB connected successfully');
+}).catch((error) => {
+  console.error('MongoDB connection error:', error);
 });
 
-// User Schema
+// User Schema - Enhanced with password reset fields
 const userSchema = new mongoose.Schema({
   name: {
     type: String,
@@ -69,12 +74,44 @@ const userSchema = new mongoose.Schema({
   lastLogin: {
     type: Date,
     default: Date.now
+  },
+  // Password reset fields
+  resetPasswordToken: {
+    type: String,
+    default: null
+  },
+  resetPasswordExpires: {
+    type: Date,
+    default: null
   }
 }, {
   timestamps: true
 });
 
 const User = mongoose.model('User', userSchema);
+
+// Email transporter configuration
+const createEmailTransporter = () => {
+  // For development, you can use a service like Gmail or a testing service like Ethereal
+  // For production, use services like SendGrid, AWS SES, etc.
+  return nodemailer.createTransporter({
+    service: 'gmail',
+    auth: {
+      user: process.env.EMAIL_USER, 
+      pass: process.env.EMAIL_PASS  
+    }
+  });
+  
+  // Alternative for testing (Ethereal Email - creates test accounts)
+  // return nodemailer.createTransporter({
+  //   host: 'smtp.ethereal.email',
+  //   port: 587,
+  //   auth: {
+  //     user: 'ethereal.user@ethereal.email',
+  //     pass: 'ethereal.pass'
+  //   }
+  // });
+};
 
 // Middleware to verify JWT token
 const authenticateToken = (req, res, next) => {
@@ -85,7 +122,7 @@ const authenticateToken = (req, res, next) => {
     return res.status(401).json({ message: 'Access token required' });
   }
 
-  jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key', (err, user) => {
+  jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
     if (err) {
       return res.status(403).json({ message: 'Invalid token' });
     }
@@ -93,8 +130,6 @@ const authenticateToken = (req, res, next) => {
     next();
   });
 };
-
-// Routes
 
 // User Registration
 app.post('/api/auth/register', async (req, res) => {
@@ -117,7 +152,7 @@ app.post('/api/auth/register', async (req, res) => {
       email,
       password: hashedPassword,
       deviceInfo: deviceInfo || 'Unknown Device',
-      location: 'Ghana' // Default location based on your user location
+      location: 'Ghana' 
     });
 
     await user.save();
@@ -166,6 +201,11 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(400).json({ message: 'Invalid email or password' });
     }
 
+    // Check if account is suspended
+    if (user.status === 'suspended') {
+      return res.status(403).json({ message: 'Account suspended. Please contact support.' });
+    }
+
     // Check password
     const isPasswordValid = await bcrypt.compare(password, user.password);
     if (!isPasswordValid) {
@@ -187,6 +227,7 @@ app.post('/api/auth/login', async (req, res) => {
     const userResponse = {
       id: user._id,
       name: user.name,
+      fullName: user.name, 
       email: user.email,
       phone: user.phone,
       location: user.location,
@@ -209,10 +250,233 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
+// Request Password Reset
+app.post('/api/auth/forgot-password', async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ message: 'Email is required' });
+    }
+
+    // Find user by email
+    const user = await User.findOne({ email: email.toLowerCase().trim() });
+    if (!user) {
+      // Return success even if user doesn't exist (security practice)
+      return res.json({ 
+        message: 'If an account with that email exists, we have sent a password reset link.',
+        success: true 
+      });
+    }
+
+    // Check if user account is suspended
+    if (user.status === 'suspended') {
+      return res.status(403).json({ 
+        message: 'Account is suspended. Please contact support.',
+        success: false 
+      });
+    }
+
+    // Rate limiting: Check if a reset was requested recently (prevent spam)
+    if (user.resetPasswordExpires && user.resetPasswordExpires > new Date()) {
+      const timeLeft = Math.ceil((user.resetPasswordExpires - new Date()) / (1000 * 60));
+      if (timeLeft > 55) { 
+        return res.status(429).json({ 
+          message: `Please wait ${timeLeft - 55} more minutes before requesting another reset.`,
+          success: false 
+        });
+      }
+    }
+
+    // Generate reset token
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    const resetTokenHash = crypto.createHash('sha256').update(resetToken).digest('hex');
+
+    // Set reset token and expiration (1 hour)
+    user.resetPasswordToken = resetTokenHash;
+    user.resetPasswordExpires = new Date(Date.now() + 60 * 60 * 1000); 
+    await user.save();
+
+    // Create reset URL
+    const resetUrl = process.env.FRONTEND_URL 
+      ? `${process.env.FRONTEND_URL}/reset-password/${resetToken}`
+      : `http://localhost:3000/reset-password/${resetToken}`;
+
+    // Email content
+    const emailHtml = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <style>
+            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background-color: #10B981; color: white; text-align: center; padding: 20px; border-radius: 8px 8px 0 0; }
+            .content { background-color: #f9f9f9; padding: 30px; border-radius: 0 0 8px 8px; }
+            .button { display: inline-block; background-color: #10B981; color: white; padding: 12px 30px; text-decoration: none; border-radius: 6px; margin: 20px 0; }
+            .footer { text-align: center; margin-top: 20px; color: #666; font-size: 12px; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>Password Reset Request</h1>
+            </div>
+            <div class="content">
+                <p>Hello ${user.name},</p>
+                <p>We received a request to reset your password for your Klingo account.</p>
+                <p>Click the button below to reset your password:</p>
+                <p style="text-align: center;">
+                    <a href="${resetUrl}" class="button">Reset Password</a>
+                </p>
+                <p>Or copy and paste this link into your browser:</p>
+                <p style="word-break: break-all; background-color: #fff; padding: 10px; border-radius: 4px;">${resetUrl}</p>
+                <p><strong>This link will expire in 1 hour for security reasons.</strong></p>
+                <p>If you didn't request this password reset, please ignore this email. Your password will remain unchanged.</p>
+                <p>Best regards,<br>The Klingo Team</p>
+            </div>
+            <div class="footer">
+                <p>This is an automated email. Please do not reply.</p>
+            </div>
+        </div>
+    </body>
+    </html>`;
+
+    // Send email (only if email configuration is available)
+    if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+      try {
+        const transporter = createEmailTransporter();
+        await transporter.sendMail({
+          from: `"Klingo Support" <${process.env.EMAIL_USER}>`,
+          to: user.email,
+          subject: 'Password Reset Request - Klingo',
+          html: emailHtml
+        });
+        console.log(`Password reset email sent to: ${user.email}`);
+      } catch (emailError) {
+        console.error('Email sending error:', emailError);
+        // Don't fail the request if email fails, just log it
+      }
+    } else {
+      console.log('Email not configured, password reset token generated but email not sent');
+      console.log(`Reset URL for ${user.email}: ${resetUrl}`);
+    }
+
+    res.json({ 
+      message: 'If an account with that email exists, we have sent a password reset link.',
+      success: true 
+    });
+
+  } catch (error) {
+    console.error('Forgot password error:', error);
+    res.status(500).json({ message: 'Server error processing password reset request' });
+  }
+});
+
+// Reset Password
+app.post('/api/auth/reset-password/:token', async (req, res) => {
+  try {
+    const { token } = req.params;
+    const { password } = req.body;
+
+    if (!password) {
+      return res.status(400).json({ message: 'Password is required' });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({ message: 'Password must be at least 6 characters long' });
+    }
+
+    // Hash the token to compare with stored hash
+    const resetTokenHash = crypto.createHash('sha256').update(token).digest('hex');
+
+    // Find user with valid reset token
+    const user = await User.findOne({
+      resetPasswordToken: resetTokenHash,
+      resetPasswordExpires: { $gt: Date.now() }
+    });
+
+    if (!user) {
+      return res.status(400).json({ 
+        message: 'Password reset token is invalid or has expired',
+        expired: true 
+      });
+    }
+
+    // Hash new password
+    const saltRounds = 10;
+    const hashedPassword = await bcrypt.hash(password, saltRounds);
+
+    // Update password and clear reset token
+    user.password = hashedPassword;
+    user.resetPasswordToken = null;
+    user.resetPasswordExpires = null;
+    await user.save();
+
+    // Generate new JWT token
+    const jwtToken = jwt.sign(
+      { userId: user._id, email: user.email },
+      process.env.JWT_SECRET || 'your-secret-key',
+      { expiresIn: '7d' }
+    );
+
+    res.json({ 
+      message: 'Password reset successful',
+      success: true,
+      token: jwtToken,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        location: user.location,
+        status: user.status,
+        emailVerified: user.emailVerified
+      }
+    });
+
+  } catch (error) {
+    console.error('Reset password error:', error);
+    res.status(500).json({ message: 'Server error resetting password' });
+  }
+});
+
+// Verify Reset Token (to check if token is valid before showing reset form)
+app.get('/api/auth/verify-reset-token/:token', async (req, res) => {
+  try {
+    const { token } = req.params;
+
+    // Hash the token to compare with stored hash
+    const resetTokenHash = crypto.createHash('sha256').update(token).digest('hex');
+
+    // Find user with valid reset token
+    const user = await User.findOne({
+      resetPasswordToken: resetTokenHash,
+      resetPasswordExpires: { $gt: Date.now() }
+    });
+
+    if (!user) {
+      return res.status(400).json({ 
+        message: 'Password reset token is invalid or has expired',
+        valid: false 
+      });
+    }
+
+    res.json({ 
+      message: 'Token is valid',
+      valid: true,
+      email: user.email 
+    });
+
+  } catch (error) {
+    console.error('Verify reset token error:', error);
+    res.status(500).json({ message: 'Server error verifying token' });
+  }
+});
+
 // Get all users (for admin dashboard)
 app.get('/api/users', async (req, res) => {
   try {
-    const users = await User.find({}, '-password').sort({ registeredAt: -1 });
+    const users = await User.find({}, '-password -resetPasswordToken').sort({ registeredAt: -1 });
     
     const formattedUsers = users.map(user => ({
       id: user._id,
@@ -238,7 +502,7 @@ app.get('/api/users', async (req, res) => {
 // Get single user
 app.get('/api/users/:id', async (req, res) => {
   try {
-    const user = await User.findById(req.params.id, '-password');
+    const user = await User.findById(req.params.id, '-password -resetPasswordToken');
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
@@ -276,7 +540,7 @@ app.patch('/api/users/:id/status', async (req, res) => {
     const user = await User.findByIdAndUpdate(
       req.params.id,
       { status },
-      { new: true, select: '-password' }
+      { new: true, select: '-password -resetPasswordToken' }
     );
 
     if (!user) {
@@ -298,7 +562,7 @@ app.put('/api/users/:id', authenticateToken, async (req, res) => {
     const user = await User.findByIdAndUpdate(
       req.params.id,
       { name, phone, location },
-      { new: true, select: '-password' }
+      { new: true, select: '-password -resetPasswordToken' }
     );
 
     if (!user) {
@@ -365,8 +629,21 @@ app.use((err, req, res, next) => {
   res.status(500).json({ message: 'Something went wrong!' });
 });
 
+// MongoDB connection event handlers
+mongoose.connection.on('connected', () => {
+  console.log('MongoDB connected successfully');
+});
+
+mongoose.connection.on('error', (err) => {
+  console.error('MongoDB connection error:', err);
+});
+
+mongoose.connection.on('disconnected', () => {
+  console.log('MongoDB disconnected');
+});
+
 // Start server
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-  console.log(`MongoDB connected: ${mongoose.connection.readyState === 1 ? 'Yes' : 'No'}`);
+  console.log(`MongoDB connection state: ${mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected'}`);
 });

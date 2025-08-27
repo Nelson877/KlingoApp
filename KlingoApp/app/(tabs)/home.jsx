@@ -6,12 +6,14 @@ import {
   ScrollView,
   SafeAreaView,
   StatusBar,
+  Modal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-function HomeScreen({ user, onRequestCleanup }) {
+function HomeScreen({ user, onRequestCleanup, onLogout, onNavigateToProfile, onNavigateToSettings }) {
   const [currentTime, setCurrentTime] = useState(new Date());
   const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -26,6 +28,45 @@ function HomeScreen({ user, onRequestCleanup }) {
     if (hour < 12) return 'Good Morning';
     if (hour < 17) return 'Good Afternoon';
     return 'Good Evening';
+  };
+
+  // Handle logout with confirmation
+  const handleLogout = () => {
+    setShowProfileMenu(false);
+    setShowLogoutModal(true);
+  };
+
+  const confirmLogout = () => {
+    setShowLogoutModal(false);
+    if (onLogout) {
+      onLogout();
+    }
+  };
+
+  const cancelLogout = () => {
+    setShowLogoutModal(false);
+    // Ensure user stays on home screen and profile menu is properly closed
+    setShowProfileMenu(false);
+  };
+
+  // Handle profile navigation
+  const handleProfilePress = () => {
+    setShowProfileMenu(false);
+    if (onNavigateToProfile) {
+      onNavigateToProfile();
+    } else {
+      console.log('Navigate to Profile - No handler provided');
+    }
+  };
+
+  // Handle settings navigation
+  const handleSettingsPress = () => {
+    setShowProfileMenu(false);
+    if (onNavigateToSettings) {
+      onNavigateToSettings();
+    } else {
+      console.log('Navigate to Settings - No handler provided');
+    }
   };
 
   // Mock data - in real app this would come from props/API
@@ -46,7 +87,10 @@ function HomeScreen({ user, onRequestCleanup }) {
         className="flex-1" 
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 20 }}
-        onScroll={() => setShowProfileMenu(false)}
+        onScroll={() => {
+          setShowProfileMenu(false);
+          setShowLogoutModal(false);
+        }}
         scrollEventThrottle={16}
       >
         {/* Header */}
@@ -72,11 +116,7 @@ function HomeScreen({ user, onRequestCleanup }) {
                 <View className="absolute top-12 right-0 bg-white rounded-xl shadow-lg border border-gray-200 py-2 w-40 z-10">
                   <TouchableOpacity
                     className="px-4 py-3 flex-row items-center"
-                    onPress={() => {
-                      setShowProfileMenu(false);
-                      // profile/settings
-                      console.log('Navigate to Profile');
-                    }}
+                    onPress={handleProfilePress}
                     activeOpacity={0.7}
                   >
                     <Ionicons name="person-outline" size={18} color="#6B7280" />
@@ -85,11 +125,7 @@ function HomeScreen({ user, onRequestCleanup }) {
                   
                   <TouchableOpacity
                     className="px-4 py-3 flex-row items-center"
-                    onPress={() => {
-                      setShowProfileMenu(false);
-                      //  settings
-                      console.log('Navigate to Settings');
-                    }}
+                    onPress={handleSettingsPress}
                     activeOpacity={0.7}
                   >
                     <Ionicons name="settings-outline" size={18} color="#6B7280" />
@@ -100,11 +136,7 @@ function HomeScreen({ user, onRequestCleanup }) {
                   
                   <TouchableOpacity
                     className="px-4 py-3 flex-row items-center"
-                    onPress={() => {
-                      setShowProfileMenu(false);
-                      //  logout functionality
-                      console.log('Logout');
-                    }}
+                    onPress={handleLogout}
                     activeOpacity={0.7}
                   >
                     <Ionicons name="log-out-outline" size={18} color="#EF4444" />
@@ -221,6 +253,66 @@ function HomeScreen({ user, onRequestCleanup }) {
           </View>
         </View>
       </ScrollView>
+
+      {/* Logout Confirmation Modal */}
+      <Modal
+        visible={showLogoutModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={cancelLogout}
+      >
+        <TouchableOpacity 
+          className="flex-1 bg-black/50 items-center justify-center px-6"
+          activeOpacity={1}
+          onPress={cancelLogout}
+        >
+          <TouchableOpacity 
+            className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl"
+            activeOpacity={1}
+            onPress={() => {}} // Prevent modal from closing when touching the modal content
+          >
+            {/* Modal Header */}
+            <View className="items-center mb-6">
+              <View className="w-16 h-16 bg-red-100 rounded-full items-center justify-center mb-4">
+                <Ionicons name="log-out-outline" size={32} color="#EF4444" />
+              </View>
+              <Text className="text-xl font-bold text-gray-900 text-center">
+                Confirm Logout
+              </Text>
+            </View>
+
+            {/* Modal Body */}
+            <Text className="text-base text-gray-600 text-center mb-8 leading-6">
+              Are you sure you want to logout? You'll need to sign in again to access your account.
+            </Text>
+
+            {/* Modal Buttons */}
+            <View className="space-y-3">
+              {/* Logout Button */}
+              <TouchableOpacity
+                className="bg-red-600 rounded-xl py-4 px-6"
+                onPress={confirmLogout}
+                activeOpacity={0.8}
+              >
+                <Text className="text-white text-base font-semibold text-center">
+                  Yes, Logout
+                </Text>
+              </TouchableOpacity>
+
+              {/* Cancel Button */}
+              <TouchableOpacity
+                className="bg-gray-100 rounded-xl py-4 px-6"
+                onPress={cancelLogout}
+                activeOpacity={0.7}
+              >
+                <Text className="text-gray-700 text-base font-semibold text-center">
+                  Cancel
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
     </SafeAreaView>
   );
 }
