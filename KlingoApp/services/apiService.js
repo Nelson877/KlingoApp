@@ -59,7 +59,6 @@ class ApiService {
         if (response.status === 429) {
           throw new Error('Rate limit exceeded. Please wait before trying again.');
         } else if (response.status === 401) {
-          // Clear stored tokens on authentication error
           await this.clearStorage();
           throw new Error('Authentication required. Please log in again.');
         } else if (response.status === 403) {
@@ -88,9 +87,8 @@ class ApiService {
   async request(endpoint, options = {}) {
     const requestId = `${options.method || 'GET'}_${endpoint}_${Date.now()}`;
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
 
-    // Request deduplication for GET requests
     if (!options.method || options.method === 'GET') {
       const existingRequest = this.requestQueue.get(endpoint);
       if (existingRequest) {
@@ -141,9 +139,8 @@ class ApiService {
     } catch (error) {
       console.error(`API Request Error (attempt ${retryCount + 1}):`, error);
       
-      // Retry logic for network errors
       if (retryCount < maxRetries && this._shouldRetry(error)) {
-        const backoffDelay = Math.min(1000 * Math.pow(2, retryCount), 10000); // Exponential backoff, max 10s
+        const backoffDelay = Math.min(1000 * Math.pow(2, retryCount), 10000);
         console.log(`Retrying request in ${backoffDelay}ms...`);
         await new Promise(resolve => setTimeout(resolve, backoffDelay));
         return this._makeRequest(endpoint, options, controller, retryCount + 1);
@@ -189,7 +186,157 @@ class ApiService {
     }
   }
 
-  // ENHANCED PASSWORD RESET METHODS
+  // ===== NEW: CLEANUP REQUEST METHODS =====
+
+  async submitCleanupRequest(requestData) {
+    console.log('Submitting cleanup request:', requestData);
+    try {
+      // Validate required fields
+      if (!requestData.problemType) {
+        throw new Error('Problem type is required');
+      }
+      if (!requestData.severity) {
+        throw new Error('Severity level is required');
+      }
+      if (!requestData.description || !requestData.description.trim()) {
+        throw new Error('Description is required');
+      }
+      if (!requestData.contactInfo?.phone || !requestData.contactInfo.phone.trim()) {
+        throw new Error('Contact phone number is required');
+      }
+
+      // Validate location based on problem type
+      if (requestData.problemType === 'other') {
+        if (!requestData.otherDetails?.specificLocation || !requestData.otherDetails.specificLocation.trim()) {
+          throw new Error('Specific location is required for other request types');
+        }
+        if (!requestData.otherDetails?.customProblemType || !requestData.otherDetails.customProblemType.trim()) {
+          throw new Error('Custom problem type is required for other requests');
+        }
+      } else {
+        if (!requestData.location || !requestData.location.trim()) {
+          throw new Error('Location is required');
+        }
+      }
+
+      const result = await this.request('/api/cleanup-requests', {
+        method: 'POST',
+        body: JSON.stringify(requestData),
+      });
+      
+      console.log('Cleanup request submitted successfully:', result);
+      return result;
+    } catch (error) {
+      console.error('Submit cleanup request failed:', error.message);
+      throw error;
+    }
+  }
+
+  async getCleanupRequests(filters = {}) {
+    console.log('Fetching cleanup requests with filters:', filters);
+    try {
+      const queryParams = new URLSearchParams();
+      
+      // Add filters to query params
+      Object.keys(filters).forEach(key => {
+        if (filters[key] !== undefined && filters[key] !== null && filters[key] !== '') {
+          queryParams.append(key, filters[key]);
+        }
+      });
+
+      const queryString = queryParams.toString();
+      const endpoint = queryString ? `/api/cleanup-requests?${queryString}` : '/api/cleanup-requests';
+      
+      const result = await this.request(endpoint);
+      console.log('Cleanup requests fetched successfully');
+      return result;
+    } catch (error) {
+      console.error('Failed to fetch cleanup requests:', error.message);
+      throw error;
+    }
+  }
+
+  async getCleanupRequest(requestId) {
+    console.log(`Fetching cleanup request ${requestId}...`);
+    try {
+      const result = await this.request(`/api/cleanup-requests/${requestId}`);
+      console.log('Cleanup request fetched successfully');
+      return result;
+    } catch (error) {
+      console.error('Failed to fetch cleanup request:', error.message);
+      throw error;
+    }
+  }
+
+  async updateCleanupRequestStatus(requestId, statusData) {
+    console.log(`Updating cleanup request ${requestId} status:`, statusData);
+    try {
+      if (!statusData.status) {
+        throw new Error('Status is required');
+      }
+
+      if (!['pending', 'in-progress', 'completed', 'cancelled'].includes(statusData.status)) {
+        throw new Error('Invalid status value');
+      }
+
+      const result = await this.request(`/api/cleanup-requests/${requestId}/status`, {
+        method: 'PATCH',
+        body: JSON.stringify(statusData),
+      });
+      
+      console.log('Cleanup request status updated successfully');
+      return result;
+    } catch (error) {
+      console.error('Failed to update cleanup request status:', error.message);
+      throw error;
+    }
+  }
+
+  async updateCleanupRequest(requestId, updateData) {
+    console.log(`Updating cleanup request ${requestId}:`, updateData);
+    try {
+      const result = await this.request(`/api/cleanup-requests/${requestId}`, {
+        method: 'PUT',
+        body: JSON.stringify(updateData),
+      });
+      
+      console.log('Cleanup request updated successfully');
+      return result;
+    } catch (error) {
+      console.error('Failed to update cleanup request:', error.message);
+      throw error;
+    }
+  }
+
+  async deleteCleanupRequest(requestId) {
+    console.log(`Deleting cleanup request ${requestId}...`);
+    try {
+      const result = await this.request(`/api/cleanup-requests/${requestId}`, {
+        method: 'DELETE',
+      });
+      
+      console.log('Cleanup request deleted successfully');
+      return result;
+    } catch (error) {
+      console.error('Failed to delete cleanup request:', error.message);
+      throw error;
+    }
+  }
+
+  async getCleanupRequestStats() {
+    console.log('Fetching cleanup request statistics...');
+    try {
+      const result = await this.request('/api/cleanup-requests/stats/summary');
+      console.log('Cleanup request stats fetched successfully');
+      return result;
+    } catch (error) {
+      console.error('Failed to fetch cleanup request stats:', error.message);
+      throw error;
+    }
+  }
+
+  // ===== PASSWORD RESET METHODS =====
+
   async forgotPassword(email) {
     console.log('Requesting password reset for:', email);
     try {
@@ -252,7 +399,6 @@ class ApiService {
         throw new Error('New password is required');
       }
 
-      // Client-side password validation
       if (newPassword.length < 8) {
         throw new Error('Password must be at least 8 characters long');
       }
@@ -275,31 +421,14 @@ class ApiService {
         throw new Error('This password reset link has expired. Please request a new one.');
       } else if (error.message.includes('invalid')) {
         throw new Error('This password reset link is invalid. Please request a new one.');
-      } else if (error.message.includes('same password')) {
-        throw new Error('New password must be different from your current password.');
-      } else if (error.message.includes('characters')) {
-        throw new Error('Password must contain uppercase, lowercase letters, numbers, and special characters.');
-      } else if (error.message.includes('Network') || error.message.includes('fetch')) {
-        throw new Error('Network error. Please check your connection and try again.');
       }
       
       throw error;
     }
   }
 
-  async resendResetEmail(email) {
-    console.log('Resending password reset email for:', email);
-    try {
-      const result = await this.forgotPassword(email);
-      console.log('Reset email resent successfully');
-      return result;
-    } catch (error) {
-      console.error('Failed to resend reset email:', error.message);
-      throw error;
-    }
-  }
+  // ===== AUTH METHODS =====
 
-  // AUTH METHODS
   async register(userData) {
     console.log('Registering new user...');
     try {
@@ -341,25 +470,8 @@ class ApiService {
     }
   }
 
-  async changePassword(currentPassword, newPassword) {
-    console.log('Changing password for authenticated user...');
-    try {
-      const result = await this.request('/api/auth/change-password', {
-        method: 'POST',
-        body: JSON.stringify({ 
-          currentPassword, 
-          newPassword 
-        }),
-      });
-      console.log('Password changed successfully');
-      return result;
-    } catch (error) {
-      console.error('Password change failed:', error.message);
-      throw error;
-    }
-  }
+  // ===== USER METHODS =====
 
-  // USER METHODS
   async getUsers() {
     console.log('Fetching users...');
     try {
@@ -384,18 +496,6 @@ class ApiService {
     }
   }
 
-  async getCurrentUser() {
-    console.log('Fetching current user profile...');
-    try {
-      const result = await this.request('/api/auth/me');
-      console.log('Current user fetched successfully');
-      return result;
-    } catch (error) {
-      console.error('Failed to fetch current user:', error.message);
-      throw error;
-    }
-  }
-
   async updateUser(userId, userData) {
     console.log(`Updating user ${userId}...`);
     try {
@@ -407,21 +507,6 @@ class ApiService {
       return result;
     } catch (error) {
       console.error('Failed to update user:', error.message);
-      throw error;
-    }
-  }
-
-  async updateCurrentUser(userData) {
-    console.log('Updating current user profile...');
-    try {
-      const result = await this.request('/api/auth/profile', {
-        method: 'PUT',
-        body: JSON.stringify(userData),
-      });
-      console.log('Profile updated successfully');
-      return result;
-    } catch (error) {
-      console.error('Failed to update profile:', error.message);
       throw error;
     }
   }
@@ -455,7 +540,8 @@ class ApiService {
     }
   }
 
-  // STATISTICS METHODS
+  // ===== STATISTICS METHODS =====
+
   async getUserStats() {
     console.log('Fetching user statistics...');
     try {
@@ -480,51 +566,8 @@ class ApiService {
     }
   }
 
-  // HEALTH CHECK
-  async healthCheck() {
-    console.log('Performing health check...');
-    try {
-      const result = await this.request('/api/health');
-      console.log('Health check successful');
-      return result;
-    } catch (error) {
-      console.error('Health check failed:', error.message);
-      throw error;
-    }
-  }
+  // ===== UTILITY METHODS =====
 
-  // UPLOAD METHODS
-  async uploadFile(file, endpoint = '/api/upload') {
-    console.log('Uploading file...');
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-
-      const token = await AsyncStorage.getItem('userToken');
-      const headers = {
-        'Accept': 'application/json',
-      };
-      
-      if (token) {
-        headers.Authorization = `Bearer ${token}`;
-      }
-
-      const response = await fetch(`${this.baseURL}${endpoint}`, {
-        method: 'POST',
-        body: formData,
-        headers,
-      });
-
-      const result = await this.handleResponse(response);
-      console.log('File uploaded successfully');
-      return result;
-    } catch (error) {
-      console.error('File upload failed:', error.message);
-      throw error;
-    }
-  }
-
-  // UTILITY METHODS
   async clearStorage() {
     console.log('Clearing local storage...');
     try {
@@ -556,43 +599,48 @@ class ApiService {
     }
   }
 
-  isResetTokenExpired(expirationTime) {
-    try {
-      const expTime = new Date(expirationTime);
-      const currentTime = new Date();
-      return currentTime > expTime;
-    } catch (error) {
-      console.error('Error checking token expiration:', error);
-      return true;
-    }
-  }
+  // ===== VALIDATION METHODS =====
 
-  formatPasswordResetError(error) {
-    const message = error.message.toLowerCase();
-    
-    if (message.includes('user not found') || message.includes('no account')) {
-      return 'No account found with this email address. Please check your email or sign up.';
-    } else if (message.includes('token') && message.includes('expired')) {
-      return 'Password reset link has expired. Please request a new one.';
-    } else if (message.includes('token') && message.includes('invalid')) {
-      return 'Invalid password reset link. Please request a new one.';
-    } else if (message.includes('password') && message.includes('weak')) {
-      return 'Password is too weak. Please use a stronger password with uppercase, lowercase, numbers, and special characters.';
-    } else if (message.includes('password') && message.includes('same')) {
-      return 'New password must be different from your current password.';
-    } else if (message.includes('rate limit') || message.includes('too many')) {
-      return 'Too many requests. Please wait a few minutes before trying again.';
-    } else if (message.includes('suspended') || message.includes('locked')) {
-      return 'Your account has been suspended. Please contact support for assistance.';
-    } else if (message.includes('network') || message.includes('connection') || message.includes('fetch')) {
-      return 'Network error. Please check your internet connection and try again.';
-    } else if (message.includes('timeout')) {
-      return 'Request timed out. Please try again.';
-    } else if (message.includes('server error') || message.includes('internal error')) {
-      return 'Server error occurred. Please try again later.';
-    } else {
-      return 'An unexpected error occurred. Please try again or contact support if the problem persists.';
+  validateCleanupRequest(requestData) {
+    const errors = [];
+
+    if (!requestData.problemType) {
+      errors.push('Problem type is required');
     }
+
+    if (!requestData.severity) {
+      errors.push('Severity level is required');
+    }
+
+    if (!requestData.description || !requestData.description.trim()) {
+      errors.push('Description is required');
+    }
+
+    if (!requestData.contactInfo?.phone || !requestData.contactInfo.phone.trim()) {
+      errors.push('Contact phone number is required');
+    }
+
+    // Validate based on problem type
+    if (requestData.problemType === 'other') {
+      if (!requestData.otherDetails?.customProblemType || !requestData.otherDetails.customProblemType.trim()) {
+        errors.push('Custom problem type is required for other requests');
+      }
+      if (!requestData.otherDetails?.specificLocation || !requestData.otherDetails.specificLocation.trim()) {
+        errors.push('Specific location is required for other requests');
+      }
+      if (!requestData.otherDetails?.preferredDate) {
+        errors.push('Preferred date is required for other requests');
+      }
+      if (!requestData.otherDetails?.preferredTime) {
+        errors.push('Preferred time is required for other requests');
+      }
+    } else {
+      if (!requestData.location || !requestData.location.trim()) {
+        errors.push('Location is required');
+      }
+    }
+
+    return errors;
   }
 
   validatePassword(password) {
@@ -641,45 +689,71 @@ class ApiService {
     return null;
   }
 
-  async refreshToken() {
-    try {
-      const refreshToken = await AsyncStorage.getItem('refreshToken');
-      if (!refreshToken) {
-        throw new Error('No refresh token available');
-      }
-
-      const response = await this.request('/api/auth/refresh', {
-        method: 'POST',
-        body: JSON.stringify({ refreshToken }),
-      });
-
-      if (response.token) {
-        await AsyncStorage.setItem('userToken', response.token);
-        if (response.refreshToken) {
-          await AsyncStorage.setItem('refreshToken', response.refreshToken);
-        }
-        return response.token;
-      }
-
-      throw new Error('Token refresh failed');
-    } catch (error) {
-      console.error('Token refresh failed:', error);
-      await this.clearStorage();
-      throw error;
+  validatePhoneNumber(phone) {
+    if (!phone || !phone.trim()) {
+      return 'Phone number is required';
     }
+    
+    // Basic phone validation - adjust regex based on your requirements
+    const phoneRegex = /^[\+]?[1-9][\d]{0,15}$/;
+    if (!phoneRegex.test(phone.replace(/[\s\-\(\)]/g, ''))) {
+      return 'Please enter a valid phone number';
+    }
+    
+    return null;
   }
 
-  async checkNetworkConnectivity() {
-    try {
-      const response = await fetch('https://www.google.com/generate_204', {
-        method: 'HEAD',
-        mode: 'no-cors',
-        cache: 'no-cache',
-        timeout: 5000
-      });
-      return true;
-    } catch (error) {
-      return false;
+  // ===== HELPER METHODS =====
+
+  formatCleanupRequestData(formData) {
+    const formatted = {
+      problemType: formData.problemType,
+      severity: formData.severity,
+      description: formData.description.trim(),
+      contactInfo: {
+        name: formData.contactInfo?.name?.trim() || 'Anonymous',
+        phone: formData.contactInfo?.phone?.trim(),
+        email: formData.contactInfo?.email?.trim() || ''
+      },
+      photos: formData.photos || []
+    };
+
+    if (formData.problemType === 'other') {
+      formatted.otherDetails = {
+        customProblemType: formData.otherDetails?.customProblemType?.trim() || '',
+        preferredDate: formData.otherDetails?.preferredDate || '',
+        preferredTime: formData.otherDetails?.preferredTime || '',
+        specificLocation: formData.otherDetails?.specificLocation?.trim() || ''
+      };
+      formatted.location = formatted.otherDetails.specificLocation;
+    } else {
+      formatted.location = formData.location?.trim() || '';
+    }
+
+    return formatted;
+  }
+
+  formatErrorMessage(error) {
+    const message = error.message.toLowerCase();
+    
+    if (message.includes('network') || message.includes('connection') || message.includes('fetch')) {
+      return 'Network error. Please check your internet connection and try again.';
+    } else if (message.includes('timeout')) {
+      return 'Request timed out. Please try again.';
+    } else if (message.includes('server error') || message.includes('internal error')) {
+      return 'Server error occurred. Please try again later.';
+    } else if (message.includes('rate limit') || message.includes('too many')) {
+      return 'Too many requests. Please wait a few minutes before trying again.';
+    } else if (message.includes('validation') || message.includes('required')) {
+      return error.message; // Return the original validation message
+    } else if (message.includes('not found')) {
+      return 'The requested resource was not found.';
+    } else if (message.includes('unauthorized') || message.includes('authentication')) {
+      return 'Please log in to continue.';
+    } else if (message.includes('forbidden') || message.includes('permission')) {
+      return 'You don\'t have permission to perform this action.';
+    } else {
+      return 'An unexpected error occurred. Please try again or contact support if the problem persists.';
     }
   }
 
@@ -698,6 +772,57 @@ class ApiService {
       registeredAt: userData.registeredAt || userData.createdAt,
       lastLogin: userData.lastLogin || userData.updatedAt
     };
+  }
+
+  formatCleanupRequestForDisplay(request) {
+    return {
+      id: request.id,
+      problemType: request.problemType,
+      problemLabel: request.problemLabel,
+      location: request.location,
+      severity: request.severity,
+      priority: request.priority || request.severity,
+      description: request.description,
+      contactInfo: request.contactInfo,
+      photos: request.photos || [],
+      otherDetails: request.otherDetails || {},
+      status: request.status,
+      assignedTo: request.assignedTo || '',
+      adminNotes: request.adminNotes || '',
+      estimatedCompletion: request.estimatedCompletion,
+      actualCompletion: request.actualCompletion,
+      submittedAt: request.submittedAt,
+      updatedAt: request.updatedAt,
+      user: request.user
+    };
+  }
+
+  // ===== HEALTH CHECK =====
+
+  async healthCheck() {
+    console.log('Performing health check...');
+    try {
+      const result = await this.request('/api/health');
+      console.log('Health check successful');
+      return result;
+    } catch (error) {
+      console.error('Health check failed:', error.message);
+      throw error;
+    }
+  }
+
+  async checkNetworkConnectivity() {
+    try {
+      const response = await fetch('https://www.google.com/generate_204', {
+        method: 'HEAD',
+        mode: 'no-cors',
+        cache: 'no-cache',
+        timeout: 5000
+      });
+      return true;
+    } catch (error) {
+      return false;
+    }
   }
 }
 
