@@ -8,8 +8,12 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  ActivityIndicator,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import * as Location from 'expo-location';
+
+let searchTimeout;
 
 function RequestCleanup({ onBack = () => {}, onSubmitRequest = () => {} }) {
   const [currentStep, setCurrentStep] = useState(1);
@@ -22,7 +26,7 @@ function RequestCleanup({ onBack = () => {}, onSubmitRequest = () => {} }) {
     contactInfo: {
       phone: "",
     },
-    // New fields for "other" option
+    
     otherDetails: {
       customProblemType: "",
       preferredDate: "",
@@ -31,6 +35,11 @@ function RequestCleanup({ onBack = () => {}, onSubmitRequest = () => {} }) {
     },
   });
   const [errors, setErrors] = useState({});
+  
+  // location features
+  const [locationSuggestions, setLocationSuggestions] = useState([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [isLoadingLocation, setIsLoadingLocation] = useState(false);
 
   const problemTypes = [
     {
@@ -91,6 +100,137 @@ function RequestCleanup({ onBack = () => {}, onSubmitRequest = () => {} }) {
       color: "#EF4444",
     },
   ];
+
+  // Common locations 
+  const commonLocations = [
+    'Kumasi Central Market',
+    'KNUST Campus',
+    'Kejetia Market', 
+    'Adum',
+    'Bantama',
+    'Asokwa',
+    'Tafo',
+    'Suame',
+    'Airport Roundabout',
+    'Manhyia Palace Area',
+    'Tech Junction',
+    'Race Course',
+    'Santasi',
+    'Kwadaso',
+    'Ayeduase'
+  ];
+
+  // Google API search
+  const searchPlaces = async (query) => {
+    if (query.length < 3) {
+      setLocationSuggestions([]);
+      setShowSuggestions(false);
+      return;
+    }
+
+    try {
+      const GOOGLE_PLACES_API_KEY = 'GOOGLE_PLACES_API_KEY';
+    
+      if (GOOGLE_PLACES_API_KEY === 'GOOGLE_PLACES_API_KEY') {
+        // Use local suggestions as fallback
+        const filteredLocations = commonLocations
+          .filter(location => location.toLowerCase().includes(query.toLowerCase()))
+          .map(location => ({ description: location, place_id: location }));
+        
+        setLocationSuggestions(filteredLocations);
+        setShowSuggestions(filteredLocations.length > 0);
+        return;
+      }
+
+      const response = await fetch(
+        `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(
+          query
+        )}&key=${GOOGLE_PLACES_API_KEY}&components=country:gh`
+      );
+      
+      const data = await response.json();
+      
+      if (data.predictions) {
+        setLocationSuggestions(data.predictions);
+        setShowSuggestions(true);
+      }
+    } catch (error) {
+      console.error('Error fetching places:', error);
+      // Fallback to local suggestions
+      const filteredLocations = commonLocations
+        .filter(location => location.toLowerCase().includes(query.toLowerCase()))
+        .map(location => ({ description: location, place_id: location }));
+      
+      setLocationSuggestions(filteredLocations);
+      setShowSuggestions(filteredLocations.length > 0);
+    }
+  };
+
+  // Enhanced getCurrentLocation function
+  const getCurrentLocation = async () => {
+    setIsLoadingLocation(true);
+    try {
+      // Request permissions
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert(
+          'Permission Denied',
+          'Please enable location permissions to use this feature'
+        );
+        setIsLoadingLocation(false);
+        return;
+      }
+
+      // Get current position
+      const location = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.High,
+      });
+
+      // Reverse geocode to get address
+      const address = await Location.reverseGeocodeAsync({
+        latitude: location.coords.latitude,
+        longitude: location.coords.longitude,
+      });
+
+      if (address && address.length > 0) {
+        const addr = address[0];
+        const formattedAddress = `${addr.name || ''} ${addr.street || ''}, ${addr.city || ''}, ${addr.region || ''}`.trim();
+        
+        if (formData.problemType === "other") {
+          setFormData({
+            ...formData,
+            otherDetails: {
+              ...formData.otherDetails,
+              specificLocation: formattedAddress
+            }
+          });
+        } else {
+          setFormData({ ...formData, location: formattedAddress });
+        }
+
+        Alert.alert(
+          '📍 Location Updated', 
+          'Your current location has been added successfully!',
+          [
+            { 
+              text: "Great!", 
+              style: "default",
+              onPress: () => console.log('Location success acknowledged')
+            }
+          ],
+          { 
+            cancelable: true,
+            userInterfaceStyle: 'light'
+          }
+        );
+      }
+    } catch (error) {
+      console.error('Error getting location:', error);
+      Alert.alert('Error', 'Could not get your current location. Please try again.');
+    } finally {
+      setIsLoadingLocation(false);
+    }
+  };
 
   const validateStep = (step) => {
     const newErrors = {};
@@ -167,22 +307,6 @@ function RequestCleanup({ onBack = () => {}, onSubmitRequest = () => {} }) {
     Alert.alert("Gallery", "Gallery picker would open here");
   };
 
-  const getCurrentLocation = () => {
-    // Placeholder for GPS functionality
-    Alert.alert("Location", "GPS location would be fetched here");
-    if (formData.problemType === "other") {
-      setFormData({
-        ...formData,
-        otherDetails: {
-          ...formData.otherDetails,
-          specificLocation: "Current GPS Location"
-        }
-      });
-    } else {
-      setFormData({ ...formData, location: "Current GPS Location" });
-    }
-  };
-
   const showDatePicker = () => {
     // Placeholder for date picker
     const today = new Date();
@@ -209,6 +333,94 @@ function RequestCleanup({ onBack = () => {}, onSubmitRequest = () => {} }) {
       }
     });
     Alert.alert("Time Picker", `Time selected: ${timeString}`);
+  };
+
+  // Location Input Component with Suggestions
+  const LocationInputWithSuggestions = ({ 
+    value, 
+    onChangeText, 
+    placeholder, 
+    error,
+    isOtherType = false 
+  }) => {
+    const handleLocationChange = (text) => {
+      onChangeText(text);
+      // Clear any previous errors
+      if (error) {
+        const errorKey = isOtherType ? 'specificLocation' : 'location';
+        setErrors({ ...errors, [errorKey]: null });
+      }
+      // Debounce the API calls
+      clearTimeout(searchTimeout);
+      searchTimeout = setTimeout(() => searchPlaces(text), 300);
+    };
+
+    const selectSuggestion = (suggestion) => {
+      onChangeText(suggestion.description);
+      setShowSuggestions(false);
+      setLocationSuggestions([]);
+    };
+
+    const handleFocus = () => {
+      if (value.length >= 2) {
+        searchPlaces(value);
+      }
+    };
+
+    const handleBlur = () => {
+      // Delay hiding suggestions to allow selection
+      setTimeout(() => {
+        setShowSuggestions(false);
+        setLocationSuggestions([]);
+      }, 200);
+    };
+
+    return (
+      <View style={{ position: 'relative', zIndex: 1000 }}>
+        <View
+          className={`bg-gray-50 rounded-xl px-4 py-4 border ${
+            error ? "border-red-500" : "border-gray-200"
+          }`}
+        >
+          <TextInput
+            className='text-base text-gray-800'
+            placeholder={placeholder}
+            placeholderTextColor='#9CA3AF'
+            value={value}
+            onChangeText={handleLocationChange}
+            onFocus={handleFocus}
+            onBlur={handleBlur}
+            multiline={isOtherType}
+          />
+        </View>
+        
+        {/* Suggestions Dropdown */}
+        {showSuggestions && locationSuggestions.length > 0 && (
+          <View className="absolute top-full left-0 right-0 bg-white border border-gray-200 rounded-xl mt-1 shadow-lg max-h-60" style={{ zIndex: 1001 }}>
+            <ScrollView nestedScrollEnabled>
+              {locationSuggestions.map((suggestion, index) => (
+                <TouchableOpacity
+                  key={suggestion.place_id || index}
+                  className="px-4 py-3 border-b border-gray-100 last:border-b-0"
+                  onPress={() => selectSuggestion(suggestion)}
+                >
+                  <View className="flex-row items-center">
+                    <Ionicons name="location-outline" size={16} color="#6B7280" />
+                    <Text className="text-gray-800 ml-2 flex-1" numberOfLines={2}>
+                      {suggestion.description}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        )}
+        
+        {error && (
+          <Text className='text-red-500 text-sm mt-1'>{error}</Text>
+        )}
+      </View>
+    );
   };
 
   const renderProgressSteps = () => (
@@ -271,43 +483,40 @@ function RequestCleanup({ onBack = () => {}, onSubmitRequest = () => {} }) {
         <Text className='text-red-500 text-sm mb-4'>{errors.customProblemType}</Text>
       )}
 
-      {/* Specific Location */}
+      {/* Specific Location with Suggestions */}
       <Text className='text-lg font-semibold text-gray-800 mb-4'>
         Specific Location Details
       </Text>
-      <View
-        className={`bg-gray-50 rounded-xl px-4 py-4 border mb-4 ${
-          errors.specificLocation ? "border-red-500" : "border-gray-200"
-        }`}
-      >
-        <TextInput
-          className='text-base text-gray-800'
-          placeholder='Provide detailed location information'
-          placeholderTextColor='#9CA3AF'
-          value={formData.otherDetails.specificLocation}
-          onChangeText={(text) =>
-            setFormData({
-              ...formData,
-              otherDetails: {
-                ...formData.otherDetails,
-                specificLocation: text
-              }
-            })
-          }
-          multiline
-        />
-      </View>
-      {errors.specificLocation && (
-        <Text className='text-red-500 text-sm mb-4'>{errors.specificLocation}</Text>
-      )}
+      <LocationInputWithSuggestions
+        value={formData.otherDetails.specificLocation}
+        onChangeText={(text) =>
+          setFormData({
+            ...formData,
+            otherDetails: {
+              ...formData.otherDetails,
+              specificLocation: text
+            }
+          })
+        }
+        placeholder="Provide detailed location information"
+        error={errors.specificLocation}
+        isOtherType={true}
+      />
 
       <TouchableOpacity
-        className='bg-green-100 border border-green-300 rounded-xl py-3 px-4 flex-row items-center justify-center mb-6'
+        className={`bg-green-100 border border-green-300 rounded-xl py-3 px-4 flex-row items-center justify-center mt-4 mb-6 ${
+          isLoadingLocation ? 'opacity-50' : ''
+        }`}
         onPress={getCurrentLocation}
+        disabled={isLoadingLocation}
       >
-        <Ionicons name='location-outline' size={20} color='#10B981' />
+        {isLoadingLocation ? (
+          <ActivityIndicator size="small" color="#10B981" />
+        ) : (
+          <Ionicons name='location-outline' size={20} color='#10B981' />
+        )}
         <Text className='text-green-700 font-medium ml-2'>
-          Use Current Location
+          {isLoadingLocation ? 'Getting Location...' : 'Use Current Location'}
         </Text>
       </TouchableOpacity>
 
@@ -422,37 +631,31 @@ function RequestCleanup({ onBack = () => {}, onSubmitRequest = () => {} }) {
         renderOtherFields()
       ) : (
         <View>
-          {/* Standard Location Input */}
+          {/* Standard Location Input with Suggestions */}
           <Text className='text-lg font-semibold text-gray-800 mb-4'>Location</Text>
           <View className='mb-4'>
-            <View
-              className={`bg-gray-50 rounded-xl px-4 py-4 border ${
-                errors.location ? "border-red-500" : "border-gray-200"
-              }`}
-            >
-              <TextInput
-                className='text-base text-gray-800'
-                placeholder='Enter address or description of location'
-                placeholderTextColor='#9CA3AF'
-                value={formData.location}
-                onChangeText={(text) =>
-                  setFormData({ ...formData, location: text })
-                }
-                multiline
-              />
-            </View>
-            {errors.location && (
-              <Text className='text-red-500 text-sm mt-1'>{errors.location}</Text>
-            )}
+            <LocationInputWithSuggestions
+              value={formData.location}
+              onChangeText={(text) => setFormData({ ...formData, location: text })}
+              placeholder="Enter address or description of location"
+              error={errors.location}
+            />
           </View>
 
           <TouchableOpacity
-            className='bg-green-100 border border-green-300 rounded-xl py-3 px-4 flex-row items-center justify-center mb-6'
+            className={`bg-green-100 border border-green-300 rounded-xl py-3 px-4 flex-row items-center justify-center mb-6 ${
+              isLoadingLocation ? 'opacity-50' : ''
+            }`}
             onPress={getCurrentLocation}
+            disabled={isLoadingLocation}
           >
-            <Ionicons name='location-outline' size={20} color='#10B981' />
+            {isLoadingLocation ? (
+              <ActivityIndicator size="small" color="#10B981" />
+            ) : (
+              <Ionicons name='location-outline' size={20} color='#10B981' />
+            )}
             <Text className='text-green-700 font-medium ml-2'>
-              Use Current Location
+              {isLoadingLocation ? 'Getting Location...' : 'Use Current Location'}
             </Text>
           </TouchableOpacity>
         </View>
@@ -647,6 +850,7 @@ function RequestCleanup({ onBack = () => {}, onSubmitRequest = () => {} }) {
         className='flex-1'
         contentContainerStyle={{ flexGrow: 1 }}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
       >
         <View className='flex-1 px-6 pt-12'>
           {/* Header */}
