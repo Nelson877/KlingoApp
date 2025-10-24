@@ -21,6 +21,9 @@
             }
           }
         }
+      },
+      "config": {
+        "googleMapsApiKey": "AIzaSyDGKi5eBLdDL1LW_BL-SPSDy80gH0lyPuk"
       }
     },
     "android": {
@@ -29,7 +32,12 @@
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
-      "usesCleartextTraffic": true
+      "usesCleartextTraffic": true,
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyDGKi5eBLdDL1LW_BL-SPSDy80gH0lyPuk"
+        }
+      }
     },
     "web": {
       "bundler": "metro",
@@ -46,7 +54,8 @@
           "resizeMode": "contain",
           "backgroundColor": "#ffffff"
         }
-      ]
+      ],
+      "expo-location"
     ],
     "experiments": {
       "typedRoutes": true

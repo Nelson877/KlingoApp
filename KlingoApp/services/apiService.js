@@ -6,9 +6,10 @@ const getApiBaseUrl = () => {
     if (Platform.OS === 'android') {
       return 'http://10.0.2.2:5000';
     } else if (Platform.OS === 'ios') {
-      return 'http://localhost:5000'; 
+      // Replace with your actual computer's IP address
+      return 'http://192.168.1.100:5000'; 
     } else {
-      return 'http://localhost:5000';
+      return 'http://192.168.1.100:5000';
     }
   }
   return 'https://your-production-api.com';
@@ -16,11 +17,52 @@ const getApiBaseUrl = () => {
 
 const API_BASE_URL = getApiBaseUrl();
 
+// Enhanced error messages for better user experience
+const USER_FRIENDLY_MESSAGES = {
+  NETWORK_ERROR: 'No internet connection. Please check your network and try again.',
+  SERVER_ERROR: 'We\'re experiencing some technical difficulties. Please try again in a moment.',
+  TIMEOUT_ERROR: 'This is taking longer than usual. Please try again.',
+  AUTH_ERROR: 'Your session has expired. Please sign in again.',
+  PERMISSION_ERROR: 'You don\'t have access to this feature.',
+  NOT_FOUND: 'We couldn\'t find what you\'re looking for.',
+  RATE_LIMIT: 'Slow down there! Please wait a moment before trying again.',
+  VALIDATION_ERROR: 'Please check your information and try again.',
+  UNKNOWN_ERROR: 'Something unexpected happened. Please try again.',
+  
+  // Login specific messages
+  LOGIN_INVALID_CREDENTIALS: 'Welcome back! We just need to verify your details. Please double-check your email and password.',
+  LOGIN_EMAIL_NOT_FOUND: 'Welcome! We don\'t recognize that email address. Would you like to create an account instead?',
+  LOGIN_WRONG_PASSWORD: 'Welcome back! That password isn\'t quite right. Please give it another try.',
+  LOGIN_ACCOUNT_LOCKED: 'Welcome! Your account is temporarily secured for safety. Our support team will help you get back in quickly.',
+  LOGIN_ACCOUNT_DISABLED: 'Welcome! There\'s a small issue with your account. Our support team is here to help resolve this.',
+  LOGIN_TOO_MANY_ATTEMPTS: 'Welcome back! You\'ve been trying hard to get in. Take a quick break and we\'ll let you try again in a few minutes.',
+  LOGIN_NETWORK_ISSUE: 'Welcome! We\'re having trouble connecting right now. Please check your internet and try again.',
+  
+  // Registration specific messages
+  REGISTER_EMAIL_EXISTS: 'Looks like you already have an account! Try signing in instead.',
+  REGISTER_WEAK_PASSWORD: 'Let\'s make your password stronger! Try adding more characters, numbers, or symbols.',
+  REGISTER_INVALID_EMAIL: 'That email doesn\'t look quite right. Mind checking it?',
+  REGISTER_TERMS_NOT_ACCEPTED: 'Just need you to accept our terms and conditions to continue.',
+  
+  // Success messages
+  LOGIN_SUCCESS: '🎉 Welcome back! Great to see you again.',
+  REGISTER_SUCCESS: '🎉 Welcome aboard! Your account is all set up.',
+  LOGOUT_SUCCESS: 'You\'ve been signed out safely. See you soon!',
+  REQUEST_SUBMITTED: '✅ All done! Your request has been submitted.',
+  UPDATE_SUCCESS: '✅ Perfect! Your information has been updated.',
+  DELETE_SUCCESS: '✅ Successfully deleted.',
+  
+  // Connection messages
+  CONNECTION_RESTORED: '🌐 You\'re back online! Everything should work normally now.',
+  CONNECTION_LOST: '📱 Connection seems spotty. Some features might not work properly.',
+};
+
 class ApiService {
   constructor() {
     this.baseURL = API_BASE_URL;
     this.requestQueue = new Map();
     this.retryQueue = new Map();
+    this.isOnline = true;
     console.log(`API Base URL initialized: ${this.baseURL}`);
     console.log(`Platform: ${Platform.OS}`);
     console.log(`Development mode: ${__DEV__}`);
@@ -56,20 +98,7 @@ class ApiService {
       const data = await response.json();
       
       if (!response.ok) {
-        if (response.status === 429) {
-          throw new Error('Rate limit exceeded. Please wait before trying again.');
-        } else if (response.status === 401) {
-          await this.clearStorage();
-          throw new Error('Authentication required. Please log in again.');
-        } else if (response.status === 403) {
-          throw new Error('Access denied. You don\'t have permission to perform this action.');
-        } else if (response.status === 404) {
-          throw new Error('Resource not found. Please check your request.');
-        } else if (response.status >= 500) {
-          throw new Error('Server error. Please try again later.');
-        }
-        
-        throw new Error(data.message || data.error || `HTTP ${response.status}: ${response.statusText}`);
+        throw this.createDetailedError(response.status, data);
       }
       
       return data;
@@ -77,11 +106,119 @@ class ApiService {
       const text = await response.text();
       
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        throw this.createDetailedError(response.status, { message: text });
       }
       
       return { message: text };
     }
+  }
+
+  createDetailedError(status, data) {
+    const error = new Error();
+    error.status = status;
+    error.data = data;
+    
+    switch (status) {
+      case 400:
+        if (data.field && data.message) {
+          error.message = data.message;
+          error.userMessage = data.message;
+        } else {
+          error.message = data.message || 'Invalid request data';
+          error.userMessage = USER_FRIENDLY_MESSAGES.VALIDATION_ERROR;
+        }
+        break;
+        
+      case 401:
+        if (data.code === 'INVALID_CREDENTIALS' || data.code === 'LOGIN_FAILED') {
+          error.message = 'Invalid credentials';
+          error.userMessage = USER_FRIENDLY_MESSAGES.LOGIN_INVALID_CREDENTIALS;
+          error.suggestions = ['Double-check your email address', 'Make sure your password is correct', 'Try the "Forgot Password" option'];
+        } else if (data.code === 'EMAIL_NOT_FOUND') {
+          error.message = 'Email not found';
+          error.userMessage = USER_FRIENDLY_MESSAGES.LOGIN_EMAIL_NOT_FOUND;
+          error.suggestions = ['Check if you typed your email correctly', 'Try creating a new account'];
+        } else if (data.code === 'WRONG_PASSWORD') {
+          error.message = 'Wrong password';
+          error.userMessage = USER_FRIENDLY_MESSAGES.LOGIN_WRONG_PASSWORD;
+          error.suggestions = ['Double-check your password', 'Use "Forgot Password" if needed'];
+        } else if (data.code === 'TOKEN_EXPIRED') {
+          error.message = 'Token expired';
+          error.userMessage = USER_FRIENDLY_MESSAGES.AUTH_ERROR;
+        } else {
+          error.message = 'Authentication required';
+          error.userMessage = USER_FRIENDLY_MESSAGES.LOGIN_INVALID_CREDENTIALS;
+          error.suggestions = ['Check your email and password', 'Try signing in again'];
+        }
+        this.clearStorage();
+        break;
+        
+      case 403:
+        if (data.code === 'ACCOUNT_LOCKED') {
+          error.message = 'Account locked';
+          error.userMessage = USER_FRIENDLY_MESSAGES.LOGIN_ACCOUNT_LOCKED;
+          error.suggestions = ['Contact our support team for help'];
+        } else if (data.code === 'ACCOUNT_DISABLED') {
+          error.message = 'Account disabled';
+          error.userMessage = USER_FRIENDLY_MESSAGES.LOGIN_ACCOUNT_DISABLED;
+          error.suggestions = ['Reach out to our support team'];
+        } else {
+          error.message = 'Access denied';
+          error.userMessage = USER_FRIENDLY_MESSAGES.PERMISSION_ERROR;
+        }
+        break;
+        
+      case 404:
+        error.message = 'Resource not found';
+        error.userMessage = USER_FRIENDLY_MESSAGES.NOT_FOUND;
+        error.suggestions = ['Try refreshing the page', 'Check if the link is correct'];
+        break;
+        
+      case 409:
+        if (data.code === 'EMAIL_EXISTS') {
+          error.message = 'Email already exists';
+          error.userMessage = USER_FRIENDLY_MESSAGES.REGISTER_EMAIL_EXISTS;
+          error.suggestions = ['Try signing in instead', 'Use a different email address'];
+        } else {
+          error.message = data.message || 'Conflict occurred';
+          error.userMessage = data.message || USER_FRIENDLY_MESSAGES.VALIDATION_ERROR;
+        }
+        break;
+        
+      case 422:
+        error.message = data.message || 'Validation failed';
+        error.userMessage = data.message || USER_FRIENDLY_MESSAGES.VALIDATION_ERROR;
+        error.validationErrors = data.errors || [];
+        break;
+        
+      case 429:
+        if (data.code === 'LOGIN_ATTEMPTS_EXCEEDED') {
+          error.message = 'Too many login attempts';
+          error.userMessage = USER_FRIENDLY_MESSAGES.LOGIN_TOO_MANY_ATTEMPTS;
+          error.suggestions = ['Wait a few minutes', 'Take a short break and try again'];
+        } else {
+          error.message = 'Rate limit exceeded';
+          error.userMessage = USER_FRIENDLY_MESSAGES.RATE_LIMIT;
+          error.suggestions = ['Wait a moment', 'Try again in a few seconds'];
+        }
+        break;
+        
+      case 500:
+      case 502:
+      case 503:
+      case 504:
+        error.message = 'Server error';
+        error.userMessage = USER_FRIENDLY_MESSAGES.SERVER_ERROR;
+        error.suggestions = ['Try again in a moment', 'Check back in a few minutes'];
+        break;
+        
+      default:
+        error.message = data.message || `HTTP ${status}`;
+        error.userMessage = USER_FRIENDLY_MESSAGES.UNKNOWN_ERROR;
+        error.suggestions = ['Try again', 'Contact support if this continues'];
+    }
+    
+    return error;
   }
 
   async request(endpoint, options = {}) {
@@ -134,50 +271,88 @@ class ApiService {
       
       console.log(`Response status: ${response.status} ${response.statusText}`);
       
+      if (!this.isOnline) {
+        this.isOnline = true;
+        console.log(USER_FRIENDLY_MESSAGES.CONNECTION_RESTORED);
+      }
+      
       return await this.handleResponse(response);
       
     } catch (error) {
       console.error(`API Request Error (attempt ${retryCount + 1}):`, error);
       
-      if (retryCount < maxRetries && this._shouldRetry(error)) {
-        const backoffDelay = Math.min(1000 * Math.pow(2, retryCount), 10000);
-        console.log(`Retrying request in ${backoffDelay}ms...`);
-        await new Promise(resolve => setTimeout(resolve, backoffDelay));
-        return this._makeRequest(endpoint, options, controller, retryCount + 1);
-      }
-      
       if (error.name === 'AbortError') {
-        throw new Error('Request timed out. Please check your internet connection and try again.');
-      } else if (error.message.includes('Network request failed') || error.message.includes('fetch')) {
-        throw new Error('Unable to connect to server. Please check your internet connection.');
+        const timeoutError = new Error();
+        timeoutError.message = 'Request timeout';
+        timeoutError.userMessage = USER_FRIENDLY_MESSAGES.TIMEOUT_ERROR;
+        throw timeoutError;
       }
       
-      throw error;
+      if (this._isNetworkError(error)) {
+        this.isOnline = false;
+        const networkError = new Error();
+        networkError.message = 'Network error';
+        networkError.userMessage = USER_FRIENDLY_MESSAGES.LOGIN_NETWORK_ISSUE;
+        networkError.suggestions = ['Check your internet connection', 'Try connecting to WiFi', 'Move to a better signal area'];
+        
+        if (retryCount < maxRetries && this._shouldRetry(error)) {
+          const backoffDelay = Math.min(1000 * Math.pow(2, retryCount), 10000);
+          console.log(`Retrying request in ${backoffDelay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, backoffDelay));
+          return this._makeRequest(endpoint, options, controller, retryCount + 1);
+        }
+        
+        throw networkError;
+      }
+      
+      if (error.userMessage) {
+        throw error;
+      }
+      
+      const genericError = new Error();
+      genericError.message = error.message || 'Unknown error';
+      genericError.userMessage = USER_FRIENDLY_MESSAGES.UNKNOWN_ERROR;
+      throw genericError;
     }
   }
 
-  _shouldRetry(error) {
+  _isNetworkError(error) {
     return error.name === 'AbortError' || 
            error.message.includes('Network request failed') ||
            error.message.includes('fetch') ||
            error.message.includes('timeout') ||
-           (error.message.includes('Server error') && !error.message.includes('500'));
+           error.message.includes('connection');
+  }
+
+  _shouldRetry(error) {
+    return this._isNetworkError(error) && !error.userMessage;
   }
 
   async testConnection() {
     try {
       console.log('Testing connection to server...');
+      console.log('Testing URL:', `${this.baseURL}/api/health`);
+      
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+      
       const response = await fetch(`${this.baseURL}/api/health`, {
         method: 'GET',
         headers: { 
           'Content-Type': 'application/json',
           'Accept': 'application/json'
         },
-        timeout: 5000,
+        signal: controller.signal,
       });
       
+      clearTimeout(timeoutId);
       const isConnected = response.ok;
       console.log(`Connection test result:`, isConnected);
+      
+      if (isConnected) {
+        const data = await response.json();
+        console.log('Server response:', data);
+      }
       
       return isConnected;
     } catch (error) {
@@ -186,49 +361,268 @@ class ApiService {
     }
   }
 
-  // ===== NEW: CLEANUP REQUEST METHODS =====
+  // ===== AUTH METHODS =====
+
+  async register(userData) {
+    console.log('Registering new user...');
+    try {
+      const validationError = this.validateRegistrationData(userData);
+      if (validationError) {
+        const error = new Error(validationError.message);
+        error.userMessage = validationError.userMessage;
+        throw error;
+      }
+
+      const result = await this.request('/api/auth/register', {
+        method: 'POST',
+        body: JSON.stringify(userData),
+      });
+      
+      console.log('Registration successful');
+      
+      if (result.token) {
+        await AsyncStorage.setItem('userToken', result.token);
+      }
+      if (result.user) {
+        await AsyncStorage.setItem('userData', JSON.stringify(result.user));
+      }
+      
+      result.userMessage = USER_FRIENDLY_MESSAGES.REGISTER_SUCCESS;
+      
+      return result;
+    } catch (error) {
+      console.error('Registration failed:', error);
+      const registrationError = new Error(error.message);
+      registrationError.userMessage = error.userMessage || USER_FRIENDLY_MESSAGES.UNKNOWN_ERROR;
+      registrationError.validationErrors = error.validationErrors;
+      throw registrationError;
+    }
+  }
+
+  async login(credentials) {
+    console.log('Logging in user...');
+    try {
+      const validationError = this.validateLoginCredentials(credentials);
+      if (validationError) {
+        const error = new Error(validationError.message);
+        error.userMessage = validationError.userMessage;
+        throw error;
+      }
+
+      const result = await this.request('/api/auth/login', {
+        method: 'POST',
+        body: JSON.stringify(credentials),
+      });
+      
+      console.log('Login successful');
+      
+      if (result.token) {
+        await AsyncStorage.setItem('userToken', result.token);
+      }
+      if (result.user) {
+        await AsyncStorage.setItem('userData', JSON.stringify(result.user));
+      }
+      
+      result.userMessage = USER_FRIENDLY_MESSAGES.LOGIN_SUCCESS;
+      
+      return result;
+    } catch (error) {
+      console.error('Login failed:', error);
+      const loginError = new Error(error.message);
+      loginError.userMessage = error.userMessage || USER_FRIENDLY_MESSAGES.LOGIN_INVALID_CREDENTIALS;
+      throw loginError;
+    }
+  }
+
+  async logout() {
+    console.log('Logging out user...');
+    try {
+      try {
+        await this.request('/api/auth/logout', { method: 'POST' });
+      } catch (serverError) {
+        console.log('Server logout failed, but continuing with local logout');
+      }
+      
+      await AsyncStorage.multiRemove(['userToken', 'userData', 'refreshToken']);
+      console.log('Logout successful');
+      
+      return { userMessage: USER_FRIENDLY_MESSAGES.LOGOUT_SUCCESS };
+    } catch (error) {
+      console.error('Logout error:', error);
+      const logoutError = new Error('Logout failed');
+      logoutError.userMessage = 'There was an issue signing you out. Please try again.';
+      throw logoutError;
+    }
+  }
+
+  // ===== VALIDATION METHODS =====
+
+  validateLoginCredentials(credentials) {
+    if (!credentials.email || !credentials.email.trim()) {
+      return {
+        message: 'Email is required',
+        userMessage: 'Please enter your email address.'
+      };
+    }
+
+    if (!credentials.password || !credentials.password.trim()) {
+      return {
+        message: 'Password is required',
+        userMessage: 'Please enter your password.'
+      };
+    }
+
+    const emailError = this.validateEmail(credentials.email);
+    if (emailError) {
+      return {
+        message: emailError,
+        userMessage: emailError
+      };
+    }
+
+    return null;
+  }
+
+  validateRegistrationData(userData) {
+    if (!userData.email || !userData.email.trim()) {
+      return {
+        message: 'Email is required',
+        userMessage: 'Please enter your email address.'
+      };
+    }
+
+    if (!userData.password || !userData.password.trim()) {
+      return {
+        message: 'Password is required',
+        userMessage: 'Please enter a password.'
+      };
+    }
+
+    if (userData.password.length < 8) {
+      return {
+        message: 'Password too short',
+        userMessage: USER_FRIENDLY_MESSAGES.REGISTER_WEAK_PASSWORD
+      };
+    }
+
+    if (userData.confirmPassword && userData.password !== userData.confirmPassword) {
+      return {
+        message: 'Passwords do not match',
+        userMessage: USER_FRIENDLY_MESSAGES.PASSWORD_MISMATCH
+      };
+    }
+
+    const emailError = this.validateEmail(userData.email);
+    if (emailError) {
+      return {
+        message: emailError,
+        userMessage: emailError
+      };
+    }
+
+    return null;
+  }
+
+  validateCleanupRequest(requestData) {
+    const errors = [];
+
+    if (!requestData.problemType) {
+      errors.push('Please select a problem type.');
+    }
+
+    if (!requestData.severity) {
+      errors.push('Please select a severity level.');
+    }
+
+    if (!requestData.description || !requestData.description.trim()) {
+      errors.push('Please provide a description of the problem.');
+    } else if (requestData.description.trim().length < 10) {
+      errors.push('Description must be at least 10 characters long.');
+    }
+
+    if (!requestData.contactInfo?.phone || !requestData.contactInfo.phone.trim()) {
+      errors.push('Please provide your phone number.');
+    } else {
+      const phoneError = this.validatePhoneNumber(requestData.contactInfo.phone);
+      if (phoneError) {
+        errors.push(phoneError);
+      }
+    }
+
+    if (requestData.problemType === 'other') {
+      if (!requestData.otherDetails?.customProblemType || !requestData.otherDetails.customProblemType.trim()) {
+        errors.push('Please specify the type of problem for other requests.');
+      }
+      if (!requestData.otherDetails?.specificLocation || !requestData.otherDetails.specificLocation.trim()) {
+        errors.push('Please provide the specific location.');
+      }
+      if (!requestData.otherDetails?.preferredDate) {
+        errors.push('Please select your preferred date.');
+      }
+      if (!requestData.otherDetails?.preferredTime) {
+        errors.push('Please select your preferred time.');
+      }
+    } else {
+      if (!requestData.location || !requestData.location.trim()) {
+        errors.push('Please provide the location of the problem.');
+      }
+    }
+
+    return errors;
+  }
+
+  validateEmail(email) {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!email) {
+      return 'Please enter your email address.';
+    }
+    if (!emailRegex.test(email)) {
+      return 'Please enter a valid email address.';
+    }
+    return null;
+  }
+
+  validatePhoneNumber(phone) {
+    if (!phone || !phone.trim()) {
+      return 'Please enter your phone number.';
+    }
+    
+    const cleanPhone = phone.replace(/[\s\-\(\)]/g, '');
+    if (cleanPhone.length < 10) {
+      return 'Phone number must be at least 10 digits.';
+    }
+    
+    return null;
+  }
+
+  // ===== CLEANUP REQUEST METHODS =====
 
   async submitCleanupRequest(requestData) {
     console.log('Submitting cleanup request:', requestData);
+    
     try {
-      // Validate required fields
-      if (!requestData.problemType) {
-        throw new Error('Problem type is required');
-      }
-      if (!requestData.severity) {
-        throw new Error('Severity level is required');
-      }
-      if (!requestData.description || !requestData.description.trim()) {
-        throw new Error('Description is required');
-      }
-      if (!requestData.contactInfo?.phone || !requestData.contactInfo.phone.trim()) {
-        throw new Error('Contact phone number is required');
+      const validationErrors = this.validateCleanupRequest(requestData);
+      if (validationErrors.length > 0) {
+        const error = new Error('Validation failed');
+        error.userMessage = validationErrors.join(' ');
+        throw error;
       }
 
-      // Validate location based on problem type
-      if (requestData.problemType === 'other') {
-        if (!requestData.otherDetails?.specificLocation || !requestData.otherDetails.specificLocation.trim()) {
-          throw new Error('Specific location is required for other request types');
-        }
-        if (!requestData.otherDetails?.customProblemType || !requestData.otherDetails.customProblemType.trim()) {
-          throw new Error('Custom problem type is required for other requests');
-        }
-      } else {
-        if (!requestData.location || !requestData.location.trim()) {
-          throw new Error('Location is required');
-        }
-      }
+      const formattedData = this.formatCleanupRequestData(requestData);
 
       const result = await this.request('/api/cleanup-requests', {
         method: 'POST',
-        body: JSON.stringify(requestData),
+        body: JSON.stringify(formattedData),
       });
       
       console.log('Cleanup request submitted successfully:', result);
+      result.userMessage = USER_FRIENDLY_MESSAGES.REQUEST_SUBMITTED;
       return result;
     } catch (error) {
       console.error('Submit cleanup request failed:', error.message);
-      throw error;
+      const submitError = new Error(error.message);
+      submitError.userMessage = error.userMessage || 'Failed to submit your request. Please try again.';
+      throw submitError;
     }
   }
 
@@ -237,7 +631,6 @@ class ApiService {
     try {
       const queryParams = new URLSearchParams();
       
-      // Add filters to query params
       Object.keys(filters).forEach(key => {
         if (filters[key] !== undefined && filters[key] !== null && filters[key] !== '') {
           queryParams.append(key, filters[key]);
@@ -248,321 +641,97 @@ class ApiService {
       const endpoint = queryString ? `/api/cleanup-requests?${queryString}` : '/api/cleanup-requests';
       
       const result = await this.request(endpoint);
-      console.log('Cleanup requests fetched successfully');
+      console.log(`Cleanup requests fetched successfully: ${result.data?.length || 0} items`);
       return result;
     } catch (error) {
       console.error('Failed to fetch cleanup requests:', error.message);
-      throw error;
+      const fetchError = new Error(error.message);
+      fetchError.userMessage = error.userMessage || 'Failed to load cleanup requests. Please try again.';
+      throw fetchError;
     }
   }
 
   async getCleanupRequest(requestId) {
-    console.log(`Fetching cleanup request ${requestId}...`);
+    console.log('Fetching cleanup request:', requestId);
     try {
       const result = await this.request(`/api/cleanup-requests/${requestId}`);
       console.log('Cleanup request fetched successfully');
       return result;
     } catch (error) {
       console.error('Failed to fetch cleanup request:', error.message);
-      throw error;
+      const fetchError = new Error(error.message);
+      fetchError.userMessage = error.userMessage || 'Failed to load cleanup request details. Please try again.';
+      throw fetchError;
     }
   }
 
-  async updateCleanupRequestStatus(requestId, statusData) {
-    console.log(`Updating cleanup request ${requestId} status:`, statusData);
+  async updateCleanupRequestStatus(requestId, status, adminNotes = '') {
+    console.log(`Updating cleanup request ${requestId} status to ${status}`);
     try {
-      if (!statusData.status) {
-        throw new Error('Status is required');
-      }
-
-      if (!['pending', 'in-progress', 'completed', 'cancelled'].includes(statusData.status)) {
-        throw new Error('Invalid status value');
-      }
-
       const result = await this.request(`/api/cleanup-requests/${requestId}/status`, {
         method: 'PATCH',
-        body: JSON.stringify(statusData),
+        body: JSON.stringify({ status, adminNotes }),
       });
       
       console.log('Cleanup request status updated successfully');
+      result.userMessage = USER_FRIENDLY_MESSAGES.UPDATE_SUCCESS;
       return result;
     } catch (error) {
       console.error('Failed to update cleanup request status:', error.message);
-      throw error;
+      const updateError = new Error(error.message);
+      updateError.userMessage = error.userMessage || 'Failed to update status. Please try again.';
+      throw updateError;
     }
   }
 
-  async updateCleanupRequest(requestId, updateData) {
-    console.log(`Updating cleanup request ${requestId}:`, updateData);
+  async assignCleanupRequest(requestId, assignee, estimatedCompletion = null) {
+    console.log(`Assigning cleanup request ${requestId} to ${assignee}`);
     try {
-      const result = await this.request(`/api/cleanup-requests/${requestId}`, {
-        method: 'PUT',
-        body: JSON.stringify(updateData),
+      const result = await this.request(`/api/cleanup-requests/${requestId}/assign`, {
+        method: 'PATCH',
+        body: JSON.stringify({ assignedTo: assignee, estimatedCompletion }),
       });
       
-      console.log('Cleanup request updated successfully');
+      console.log('Cleanup request assigned successfully');
+      result.userMessage = USER_FRIENDLY_MESSAGES.UPDATE_SUCCESS;
       return result;
     } catch (error) {
-      console.error('Failed to update cleanup request:', error.message);
-      throw error;
+      console.error('Failed to assign cleanup request:', error.message);
+      const assignError = new Error(error.message);
+      assignError.userMessage = error.userMessage || 'Failed to assign request. Please try again.';
+      throw assignError;
     }
   }
 
   async deleteCleanupRequest(requestId) {
-    console.log(`Deleting cleanup request ${requestId}...`);
+    console.log(`Deleting cleanup request ${requestId}`);
     try {
       const result = await this.request(`/api/cleanup-requests/${requestId}`, {
         method: 'DELETE',
       });
       
       console.log('Cleanup request deleted successfully');
+      result.userMessage = USER_FRIENDLY_MESSAGES.DELETE_SUCCESS;
       return result;
     } catch (error) {
       console.error('Failed to delete cleanup request:', error.message);
-      throw error;
+      const deleteError = new Error(error.message);
+      deleteError.userMessage = error.userMessage || 'Failed to delete request. Please try again.';
+      throw deleteError;
     }
   }
 
-  async getCleanupRequestStats() {
-    console.log('Fetching cleanup request statistics...');
+  async getCleanupStats() {
+    console.log('Fetching cleanup statistics');
     try {
-      const result = await this.request('/api/cleanup-requests/stats/summary');
-      console.log('Cleanup request stats fetched successfully');
+      const result = await this.request('/api/cleanup-requests/stats');
+      console.log('Cleanup statistics fetched successfully');
       return result;
     } catch (error) {
-      console.error('Failed to fetch cleanup request stats:', error.message);
-      throw error;
-    }
-  }
-
-  // ===== PASSWORD RESET METHODS =====
-
-  async forgotPassword(email) {
-    console.log('Requesting password reset for:', email);
-    try {
-      if (!email || !email.trim()) {
-        throw new Error('Email is required');
-      }
-
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(email)) {
-        throw new Error('Please enter a valid email address');
-      }
-
-      const result = await this.request('/api/auth/forgot-password', {
-        method: 'POST',
-        body: JSON.stringify({ email: email.toLowerCase().trim() }),
-      });
-      
-      console.log('Password reset request sent successfully');
-      return result;
-    } catch (error) {
-      console.error('Password reset request failed:', error.message);
-      throw error;
-    }
-  }
-
-  async verifyResetToken(token) {
-    console.log('Verifying password reset token...');
-    try {
-      if (!token) {
-        throw new Error('Reset token is required');
-      }
-
-      const result = await this.request(`/api/auth/verify-reset-token/${token}`, {
-        method: 'GET',
-      });
-      
-      console.log('Reset token verified successfully');
-      return result;
-    } catch (error) {
-      console.error('Reset token verification failed:', error.message);
-      
-      if (error.message.includes('expired')) {
-        throw new Error('This password reset link has expired. Please request a new one.');
-      } else if (error.message.includes('invalid')) {
-        throw new Error('This password reset link is invalid. Please request a new one.');
-      }
-      
-      throw error;
-    }
-  }
-
-  async resetPassword(token, newPassword) {
-    console.log('Resetting password with token...');
-    try {
-      if (!token) {
-        throw new Error('Reset token is required');
-      }
-
-      if (!newPassword) {
-        throw new Error('New password is required');
-      }
-
-      if (newPassword.length < 8) {
-        throw new Error('Password must be at least 8 characters long');
-      }
-
-      if (newPassword.length > 50) {
-        throw new Error('Password must be less than 50 characters');
-      }
-
-      const result = await this.request(`/api/auth/reset-password/${token}`, {
-        method: 'POST',
-        body: JSON.stringify({ password: newPassword.trim() }),
-      });
-
-      console.log('Password reset successful');
-      return result;
-    } catch (error) {
-      console.error('Password reset failed:', error.message);
-      
-      if (error.message.includes('expired')) {
-        throw new Error('This password reset link has expired. Please request a new one.');
-      } else if (error.message.includes('invalid')) {
-        throw new Error('This password reset link is invalid. Please request a new one.');
-      }
-      
-      throw error;
-    }
-  }
-
-  // ===== AUTH METHODS =====
-
-  async register(userData) {
-    console.log('Registering new user...');
-    try {
-      const result = await this.request('/api/auth/register', {
-        method: 'POST',
-        body: JSON.stringify(userData),
-      });
-      console.log('Registration successful');
-      return result;
-    } catch (error) {
-      console.error('Registration failed:', error.message);
-      throw error;
-    }
-  }
-
-  async login(credentials) {
-    console.log('Logging in user...');
-    try {
-      const result = await this.request('/api/auth/login', {
-        method: 'POST',
-        body: JSON.stringify(credentials),
-      });
-      console.log('Login successful');
-      return result;
-    } catch (error) {
-      console.error('Login failed:', error.message);
-      throw error;
-    }
-  }
-
-  async logout() {
-    console.log('Logging out user...');
-    try {
-      await AsyncStorage.multiRemove(['userToken', 'userData', 'refreshToken']);
-      console.log('Logout successful');
-    } catch (error) {
-      console.error('Logout error:', error);
-      throw error;
-    }
-  }
-
-  // ===== USER METHODS =====
-
-  async getUsers() {
-    console.log('Fetching users...');
-    try {
-      const result = await this.request('/api/users');
-      console.log('Users fetched successfully');
-      return result;
-    } catch (error) {
-      console.error('Failed to fetch users:', error.message);
-      throw error;
-    }
-  }
-
-  async getUser(userId) {
-    console.log(`Fetching user ${userId}...`);
-    try {
-      const result = await this.request(`/api/users/${userId}`);
-      console.log('User fetched successfully');
-      return result;
-    } catch (error) {
-      console.error('Failed to fetch user:', error.message);
-      throw error;
-    }
-  }
-
-  async updateUser(userId, userData) {
-    console.log(`Updating user ${userId}...`);
-    try {
-      const result = await this.request(`/api/users/${userId}`, {
-        method: 'PUT',
-        body: JSON.stringify(userData),
-      });
-      console.log('User updated successfully');
-      return result;
-    } catch (error) {
-      console.error('Failed to update user:', error.message);
-      throw error;
-    }
-  }
-
-  async updateUserStatus(userId, status) {
-    console.log(`Updating user ${userId} status to ${status}...`);
-    try {
-      const result = await this.request(`/api/users/${userId}/status`, {
-        method: 'PATCH',
-        body: JSON.stringify({ status }),
-      });
-      console.log('User status updated successfully');
-      return result;
-    } catch (error) {
-      console.error('Failed to update user status:', error.message);
-      throw error;
-    }
-  }
-
-  async deleteUser(userId) {
-    console.log(`Deleting user ${userId}...`);
-    try {
-      const result = await this.request(`/api/users/${userId}`, {
-        method: 'DELETE',
-      });
-      console.log('User deleted successfully');
-      return result;
-    } catch (error) {
-      console.error('Failed to delete user:', error.message);
-      throw error;
-    }
-  }
-
-  // ===== STATISTICS METHODS =====
-
-  async getUserStats() {
-    console.log('Fetching user statistics...');
-    try {
-      const result = await this.request('/api/stats/users');
-      console.log('User stats fetched successfully');
-      return result;
-    } catch (error) {
-      console.error('Failed to fetch user stats:', error.message);
-      throw error;
-    }
-  }
-
-  async getDashboardStats() {
-    console.log('Fetching dashboard statistics...');
-    try {
-      const result = await this.request('/api/stats/dashboard');
-      console.log('Dashboard stats fetched successfully');
-      return result;
-    } catch (error) {
-      console.error('Failed to fetch dashboard stats:', error.message);
-      throw error;
+      console.error('Failed to fetch cleanup statistics:', error.message);
+      const statsError = new Error(error.message);
+      statsError.userMessage = error.userMessage || 'Failed to load statistics. Please try again.';
+      throw statsError;
     }
   }
 
@@ -599,111 +768,37 @@ class ApiService {
     }
   }
 
-  // ===== VALIDATION METHODS =====
+  getDisplayMessage(error) {
+    return error.userMessage || error.message || USER_FRIENDLY_MESSAGES.UNKNOWN_ERROR;
+  }
 
-  validateCleanupRequest(requestData) {
-    const errors = [];
+  getErrorSuggestions(error) {
+    return error.suggestions || [];
+  }
 
-    if (!requestData.problemType) {
-      errors.push('Problem type is required');
-    }
+  isRecoverableError(error) {
+    const recoverableStatuses = [400, 401, 422, 429];
+    return recoverableStatuses.includes(error.status) || this._isNetworkError(error);
+  }
 
-    if (!requestData.severity) {
-      errors.push('Severity level is required');
-    }
-
-    if (!requestData.description || !requestData.description.trim()) {
-      errors.push('Description is required');
-    }
-
-    if (!requestData.contactInfo?.phone || !requestData.contactInfo.phone.trim()) {
-      errors.push('Contact phone number is required');
-    }
-
-    // Validate based on problem type
-    if (requestData.problemType === 'other') {
-      if (!requestData.otherDetails?.customProblemType || !requestData.otherDetails.customProblemType.trim()) {
-        errors.push('Custom problem type is required for other requests');
-      }
-      if (!requestData.otherDetails?.specificLocation || !requestData.otherDetails.specificLocation.trim()) {
-        errors.push('Specific location is required for other requests');
-      }
-      if (!requestData.otherDetails?.preferredDate) {
-        errors.push('Preferred date is required for other requests');
-      }
-      if (!requestData.otherDetails?.preferredTime) {
-        errors.push('Preferred time is required for other requests');
-      }
+  getRecoveryActions(error) {
+    const actions = [];
+    
+    if (error.status === 401) {
+      actions.push({ label: 'Try Again', action: 'retry' });
+      actions.push({ label: 'Forgot Password?', action: 'forgot_password' });
+      actions.push({ label: 'Create Account', action: 'register' });
+    } else if (this._isNetworkError(error)) {
+      actions.push({ label: 'Check Connection', action: 'check_network' });
+      actions.push({ label: 'Try Again', action: 'retry' });
+    } else if (error.status === 429) {
+      actions.push({ label: 'Wait & Retry', action: 'wait_retry' });
     } else {
-      if (!requestData.location || !requestData.location.trim()) {
-        errors.push('Location is required');
-      }
+      actions.push({ label: 'Try Again', action: 'retry' });
     }
-
-    return errors;
+    
+    return actions;
   }
-
-  validatePassword(password) {
-    const errors = [];
-    
-    if (!password) {
-      errors.push('Password is required');
-      return errors;
-    }
-    
-    if (password.length < 8) {
-      errors.push('Password must be at least 8 characters long');
-    }
-    
-    if (password.length > 50) {
-      errors.push('Password must be less than 50 characters');
-    }
-    
-    if (!/[a-z]/.test(password)) {
-      errors.push('Password must contain at least one lowercase letter');
-    }
-    
-    if (!/[A-Z]/.test(password)) {
-      errors.push('Password must contain at least one uppercase letter');
-    }
-    
-    if (!/\d/.test(password)) {
-      errors.push('Password must contain at least one number');
-    }
-    
-    if (!/[!@#$%^&*(),.?":{}|<>]/.test(password)) {
-      errors.push('Password should contain at least one special character');
-    }
-    
-    return errors;
-  }
-
-  validateEmail(email) {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!email) {
-      return 'Email is required';
-    }
-    if (!emailRegex.test(email)) {
-      return 'Please enter a valid email address';
-    }
-    return null;
-  }
-
-  validatePhoneNumber(phone) {
-    if (!phone || !phone.trim()) {
-      return 'Phone number is required';
-    }
-    
-    // Basic phone validation - adjust regex based on your requirements
-    const phoneRegex = /^[\+]?[1-9][\d]{0,15}$/;
-    if (!phoneRegex.test(phone.replace(/[\s\-\(\)]/g, ''))) {
-      return 'Please enter a valid phone number';
-    }
-    
-    return null;
-  }
-
-  // ===== HELPER METHODS =====
 
   formatCleanupRequestData(formData) {
     const formatted = {
@@ -715,7 +810,9 @@ class ApiService {
         phone: formData.contactInfo?.phone?.trim(),
         email: formData.contactInfo?.email?.trim() || ''
       },
-      photos: formData.photos || []
+      photos: formData.photos || [],
+      coordinates: formData.coordinates || {},
+      deviceInfo: formData.deviceInfo || `${Platform.OS} ${Platform.Version}`
     };
 
     if (formData.problemType === 'other') {
@@ -728,101 +825,10 @@ class ApiService {
       formatted.location = formatted.otherDetails.specificLocation;
     } else {
       formatted.location = formData.location?.trim() || '';
+      formatted.otherDetails = {};
     }
 
     return formatted;
-  }
-
-  formatErrorMessage(error) {
-    const message = error.message.toLowerCase();
-    
-    if (message.includes('network') || message.includes('connection') || message.includes('fetch')) {
-      return 'Network error. Please check your internet connection and try again.';
-    } else if (message.includes('timeout')) {
-      return 'Request timed out. Please try again.';
-    } else if (message.includes('server error') || message.includes('internal error')) {
-      return 'Server error occurred. Please try again later.';
-    } else if (message.includes('rate limit') || message.includes('too many')) {
-      return 'Too many requests. Please wait a few minutes before trying again.';
-    } else if (message.includes('validation') || message.includes('required')) {
-      return error.message; // Return the original validation message
-    } else if (message.includes('not found')) {
-      return 'The requested resource was not found.';
-    } else if (message.includes('unauthorized') || message.includes('authentication')) {
-      return 'Please log in to continue.';
-    } else if (message.includes('forbidden') || message.includes('permission')) {
-      return 'You don\'t have permission to perform this action.';
-    } else {
-      return 'An unexpected error occurred. Please try again or contact support if the problem persists.';
-    }
-  }
-
-  formatUserData(userData) {
-    return {
-      id: userData.id || userData._id,
-      name: userData.name || userData.fullName,
-      fullName: userData.fullName || userData.name,
-      email: userData.email,
-      phone: userData.phone || '',
-      location: userData.location || 'Not specified',
-      status: userData.status || 'active',
-      emailVerified: userData.emailVerified || false,
-      deviceInfo: userData.deviceInfo || '',
-      requestsCount: userData.requestsCount || 0,
-      registeredAt: userData.registeredAt || userData.createdAt,
-      lastLogin: userData.lastLogin || userData.updatedAt
-    };
-  }
-
-  formatCleanupRequestForDisplay(request) {
-    return {
-      id: request.id,
-      problemType: request.problemType,
-      problemLabel: request.problemLabel,
-      location: request.location,
-      severity: request.severity,
-      priority: request.priority || request.severity,
-      description: request.description,
-      contactInfo: request.contactInfo,
-      photos: request.photos || [],
-      otherDetails: request.otherDetails || {},
-      status: request.status,
-      assignedTo: request.assignedTo || '',
-      adminNotes: request.adminNotes || '',
-      estimatedCompletion: request.estimatedCompletion,
-      actualCompletion: request.actualCompletion,
-      submittedAt: request.submittedAt,
-      updatedAt: request.updatedAt,
-      user: request.user
-    };
-  }
-
-  // ===== HEALTH CHECK =====
-
-  async healthCheck() {
-    console.log('Performing health check...');
-    try {
-      const result = await this.request('/api/health');
-      console.log('Health check successful');
-      return result;
-    } catch (error) {
-      console.error('Health check failed:', error.message);
-      throw error;
-    }
-  }
-
-  async checkNetworkConnectivity() {
-    try {
-      const response = await fetch('https://www.google.com/generate_204', {
-        method: 'HEAD',
-        mode: 'no-cors',
-        cache: 'no-cache',
-        timeout: 5000
-      });
-      return true;
-    } catch (error) {
-      return false;
-    }
   }
 }
 

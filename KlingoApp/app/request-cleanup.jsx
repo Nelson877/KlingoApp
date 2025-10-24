@@ -9,14 +9,19 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  Modal,
+  Dimensions,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import * as Location from 'expo-location';
+import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
+import ApiService from '../services/apiService'; 
 
 let searchTimeout;
 
 function RequestCleanup({ onBack = () => {}, onSubmitRequest = () => {} }) {
   const [currentStep, setCurrentStep] = useState(1);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [formData, setFormData] = useState({
     photos: [],
     location: "",
@@ -25,21 +30,23 @@ function RequestCleanup({ onBack = () => {}, onSubmitRequest = () => {} }) {
     description: "",
     contactInfo: {
       phone: "",
+      name: "",
+      email: ""
     },
-    
     otherDetails: {
       customProblemType: "",
       preferredDate: "",
       preferredTime: "",
       specificLocation: "",
     },
+    coordinates: null,
   });
   const [errors, setErrors] = useState({});
   
-  // location features
-  const [locationSuggestions, setLocationSuggestions] = useState([]);
-  const [showSuggestions, setShowSuggestions] = useState(false);
   const [isLoadingLocation, setIsLoadingLocation] = useState(false);
+  const [showMapModal, setShowMapModal] = useState(false);
+  const [mapRegion, setMapRegion] = useState(null);
+  const [selectedLocation, setSelectedLocation] = useState(null);
 
   const problemTypes = [
     {
@@ -101,76 +108,9 @@ function RequestCleanup({ onBack = () => {}, onSubmitRequest = () => {} }) {
     },
   ];
 
-  // Common locations 
-  const commonLocations = [
-    'Kumasi Central Market',
-    'KNUST Campus',
-    'Kejetia Market', 
-    'Adum',
-    'Bantama',
-    'Asokwa',
-    'Tafo',
-    'Suame',
-    'Airport Roundabout',
-    'Manhyia Palace Area',
-    'Tech Junction',
-    'Race Course',
-    'Santasi',
-    'Kwadaso',
-    'Ayeduase'
-  ];
-
-  // Google API search
-  const searchPlaces = async (query) => {
-    if (query.length < 3) {
-      setLocationSuggestions([]);
-      setShowSuggestions(false);
-      return;
-    }
-
-    try {
-      const GOOGLE_PLACES_API_KEY = 'GOOGLE_PLACES_API_KEY';
-    
-      if (GOOGLE_PLACES_API_KEY === 'GOOGLE_PLACES_API_KEY') {
-        // Use local suggestions as fallback
-        const filteredLocations = commonLocations
-          .filter(location => location.toLowerCase().includes(query.toLowerCase()))
-          .map(location => ({ description: location, place_id: location }));
-        
-        setLocationSuggestions(filteredLocations);
-        setShowSuggestions(filteredLocations.length > 0);
-        return;
-      }
-
-      const response = await fetch(
-        `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(
-          query
-        )}&key=${GOOGLE_PLACES_API_KEY}&components=country:gh`
-      );
-      
-      const data = await response.json();
-      
-      if (data.predictions) {
-        setLocationSuggestions(data.predictions);
-        setShowSuggestions(true);
-      }
-    } catch (error) {
-      console.error('Error fetching places:', error);
-      // Fallback to local suggestions
-      const filteredLocations = commonLocations
-        .filter(location => location.toLowerCase().includes(query.toLowerCase()))
-        .map(location => ({ description: location, place_id: location }));
-      
-      setLocationSuggestions(filteredLocations);
-      setShowSuggestions(filteredLocations.length > 0);
-    }
-  };
-
-  // Enhanced getCurrentLocation function
   const getCurrentLocation = async () => {
     setIsLoadingLocation(true);
     try {
-      // Request permissions
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
         Alert.alert(
@@ -181,17 +121,14 @@ function RequestCleanup({ onBack = () => {}, onSubmitRequest = () => {} }) {
         return;
       }
 
-      // Get current position
       const location = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.High,
       });
 
-      // Reverse geocode to get address
-      const address = await Location.reverseGeocodeAsync({
-        latitude: location.coords.latitude,
-        longitude: location.coords.longitude,
-      });
+      const { latitude, longitude } = location.coords;
 
+      const address = await Location.reverseGeocodeAsync({ latitude, longitude });
+      
       if (address && address.length > 0) {
         const addr = address[0];
         const formattedAddress = `${addr.name || ''} ${addr.street || ''}, ${addr.city || ''}, ${addr.region || ''}`.trim();
@@ -202,33 +139,136 @@ function RequestCleanup({ onBack = () => {}, onSubmitRequest = () => {} }) {
             otherDetails: {
               ...formData.otherDetails,
               specificLocation: formattedAddress
-            }
+            },
+            coordinates: { latitude, longitude }
           });
         } else {
-          setFormData({ ...formData, location: formattedAddress });
+          setFormData({ 
+            ...formData, 
+            location: formattedAddress,
+            coordinates: { latitude, longitude }
+          });
         }
 
         Alert.alert(
-          '📍 Location Updated', 
-          'Your current location has been added successfully!',
-          [
-            { 
-              text: "Great!", 
-              style: "default",
-              onPress: () => console.log('Location success acknowledged')
-            }
-          ],
-          { 
-            cancelable: true,
-            userInterfaceStyle: 'light'
-          }
+          'Location Detected!',
+          'Your current location has been added successfully.',
+          [{ text: 'OK' }]
         );
       }
     } catch (error) {
       console.error('Error getting location:', error);
-      Alert.alert('Error', 'Could not get your current location. Please try again.');
+      Alert.alert('Error', 'Could not get your current location. Please try again or use the map.');
     } finally {
       setIsLoadingLocation(false);
+    }
+  };
+
+  const openMapPicker = async () => {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert(
+          'Permission Denied',
+          'Please enable location permissions to use the map'
+        );
+        return;
+      }
+
+      const location = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+
+      const { latitude, longitude } = location.coords;
+
+      setMapRegion({
+        latitude,
+        longitude,
+        latitudeDelta: 0.005,
+        longitudeDelta: 0.005,
+      });
+
+      setSelectedLocation({ latitude, longitude });
+      setShowMapModal(true);
+    } catch (error) {
+      console.error('Error opening map:', error);
+      setMapRegion({
+        latitude: 6.6745,
+        longitude: -1.5716,
+        latitudeDelta: 0.01,
+        longitudeDelta: 0.01,
+      });
+      setShowMapModal(true);
+    }
+  };
+
+  const confirmMapLocation = async () => {
+    if (!selectedLocation) {
+      Alert.alert('No Location Selected', 'Please tap on the map to select a location');
+      return;
+    }
+
+    try {
+      const address = await Location.reverseGeocodeAsync(selectedLocation);
+      
+      if (address && address.length > 0) {
+        const addr = address[0];
+        const formattedAddress = `${addr.name || ''} ${addr.street || ''}, ${addr.city || ''}, ${addr.region || ''}`.trim();
+        
+        if (formData.problemType === "other") {
+          setFormData({
+            ...formData,
+            otherDetails: {
+              ...formData.otherDetails,
+              specificLocation: formattedAddress
+            },
+            coordinates: selectedLocation
+          });
+        } else {
+          setFormData({ 
+            ...formData, 
+            location: formattedAddress,
+            coordinates: selectedLocation
+          });
+        }
+      }
+
+      setShowMapModal(false);
+      Alert.alert('Success', 'Location selected successfully!');
+    } catch (error) {
+      console.error('Error confirming location:', error);
+      Alert.alert('Error', 'Could not process the location. Please try again.');
+    }
+  };
+
+  const handleMapPress = (event) => {
+    const { latitude, longitude } = event.nativeEvent.coordinate;
+    setSelectedLocation({ latitude, longitude });
+  };
+
+  const extractLocationFromUrl = (url) => {
+    try {
+      const patterns = [
+        /q=([^&]+)/i,
+        /@(-?\d+\.\d+),(-?\d+\.\d+)/,
+        /place\/([^/]+)\//,
+        /maps\?.*q=([^&]+)/i
+      ];
+
+      for (const pattern of patterns) {
+        const match = url.match(pattern);
+        if (match) {
+          if (pattern.source.includes('@')) {
+            return `${match[1]}, ${match[2]}`;
+          } else {
+            return decodeURIComponent(match[1].replace(/\+/g, ' '));
+          }
+        }
+      }
+      return null;
+    } catch (error) {
+      console.error('Error extracting location:', error);
+      return null;
     }
   };
 
@@ -239,7 +279,6 @@ function RequestCleanup({ onBack = () => {}, onSubmitRequest = () => {} }) {
       if (!formData.problemType)
         newErrors.problemType = "Please select a problem type";
       
-      // Special validation for "other" option
       if (formData.problemType === "other") {
         if (!formData.otherDetails.customProblemType.trim())
           newErrors.customProblemType = "Please specify the type of problem";
@@ -289,26 +328,88 @@ function RequestCleanup({ onBack = () => {}, onSubmitRequest = () => {} }) {
     }
   };
 
-  const handleSubmit = () => {
-    Alert.alert(
-      "Request Submitted!",
-      "Thank you for helping keep our community clean. We'll review your request and take appropriate action.",
-      [{ text: "OK", onPress: () => onSubmitRequest(formData) }]
-    );
+  const handleSubmit = async () => {
+    setIsSubmitting(true);
+
+    try {
+      const submissionData = {
+        problemType: formData.problemType,
+        location: formData.problemType === "other" 
+          ? formData.otherDetails.specificLocation 
+          : formData.location,
+        severity: formData.severity,
+        description: formData.description,
+        contactInfo: {
+          name: formData.contactInfo.name || 'Anonymous',
+          phone: formData.contactInfo.phone,
+          email: formData.contactInfo.email || ''
+        },
+        photos: formData.photos || [],
+        otherDetails: formData.problemType === "other" ? formData.otherDetails : {},
+        coordinates: formData.coordinates || {},
+        deviceInfo: Platform.OS + ' ' + Platform.Version
+      };
+
+      console.log('Submitting data:', submissionData);
+
+      const result = await ApiService.submitCleanupRequest(submissionData);
+
+      Alert.alert(
+        "Request Submitted Successfully!",
+        "Thank you for helping keep our community clean. We'll review your request and take appropriate action.",
+        [{ 
+          text: "OK", 
+          onPress: () => {
+            onSubmitRequest(submissionData);
+            setCurrentStep(1);
+            setFormData({
+              photos: [],
+              location: "",
+              problemType: "",
+              severity: "",
+              description: "",
+              contactInfo: { phone: "", name: "", email: "" },
+              otherDetails: {
+                customProblemType: "",
+                preferredDate: "",
+                preferredTime: "",
+                specificLocation: "",
+              },
+              coordinates: null,
+            });
+          }
+        }]
+      );
+    } catch (error) {
+      console.error('Submission error:', error);
+      Alert.alert(
+        "Submission Failed",
+        error.userMessage || "There was an error submitting your request. Please check your internet connection and try again.",
+        [
+          { 
+            text: "Retry", 
+            onPress: () => handleSubmit()
+          },
+          { 
+            text: "Cancel", 
+            style: "cancel"
+          }
+        ]
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const takePicture = () => {
-    // Placeholder for camera functionality
     Alert.alert("Camera", "Camera functionality would open here");
   };
 
   const getFromGallery = () => {
-    // Placeholder for gallery functionality
     Alert.alert("Gallery", "Gallery picker would open here");
   };
 
   const showDatePicker = () => {
-    // Placeholder for date picker
     const today = new Date();
     const dateString = today.toLocaleDateString();
     setFormData({
@@ -322,7 +423,6 @@ function RequestCleanup({ onBack = () => {}, onSubmitRequest = () => {} }) {
   };
 
   const showTimePicker = () => {
-    // Placeholder for time picker
     const now = new Date();
     const timeString = now.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
     setFormData({
@@ -333,94 +433,6 @@ function RequestCleanup({ onBack = () => {}, onSubmitRequest = () => {} }) {
       }
     });
     Alert.alert("Time Picker", `Time selected: ${timeString}`);
-  };
-
-  // Location Input Component with Suggestions
-  const LocationInputWithSuggestions = ({ 
-    value, 
-    onChangeText, 
-    placeholder, 
-    error,
-    isOtherType = false 
-  }) => {
-    const handleLocationChange = (text) => {
-      onChangeText(text);
-      // Clear any previous errors
-      if (error) {
-        const errorKey = isOtherType ? 'specificLocation' : 'location';
-        setErrors({ ...errors, [errorKey]: null });
-      }
-      // Debounce the API calls
-      clearTimeout(searchTimeout);
-      searchTimeout = setTimeout(() => searchPlaces(text), 300);
-    };
-
-    const selectSuggestion = (suggestion) => {
-      onChangeText(suggestion.description);
-      setShowSuggestions(false);
-      setLocationSuggestions([]);
-    };
-
-    const handleFocus = () => {
-      if (value.length >= 2) {
-        searchPlaces(value);
-      }
-    };
-
-    const handleBlur = () => {
-      // Delay hiding suggestions to allow selection
-      setTimeout(() => {
-        setShowSuggestions(false);
-        setLocationSuggestions([]);
-      }, 200);
-    };
-
-    return (
-      <View style={{ position: 'relative', zIndex: 1000 }}>
-        <View
-          className={`bg-gray-50 rounded-xl px-4 py-4 border ${
-            error ? "border-red-500" : "border-gray-200"
-          }`}
-        >
-          <TextInput
-            className='text-base text-gray-800'
-            placeholder={placeholder}
-            placeholderTextColor='#9CA3AF'
-            value={value}
-            onChangeText={handleLocationChange}
-            onFocus={handleFocus}
-            onBlur={handleBlur}
-            multiline={isOtherType}
-          />
-        </View>
-        
-        {/* Suggestions Dropdown */}
-        {showSuggestions && locationSuggestions.length > 0 && (
-          <View className="absolute top-full left-0 right-0 bg-white border border-gray-200 rounded-xl mt-1 shadow-lg max-h-60" style={{ zIndex: 1001 }}>
-            <ScrollView nestedScrollEnabled>
-              {locationSuggestions.map((suggestion, index) => (
-                <TouchableOpacity
-                  key={suggestion.place_id || index}
-                  className="px-4 py-3 border-b border-gray-100 last:border-b-0"
-                  onPress={() => selectSuggestion(suggestion)}
-                >
-                  <View className="flex-row items-center">
-                    <Ionicons name="location-outline" size={16} color="#6B7280" />
-                    <Text className="text-gray-800 ml-2 flex-1" numberOfLines={2}>
-                      {suggestion.description}
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-        )}
-        
-        {error && (
-          <Text className='text-red-500 text-sm mt-1'>{error}</Text>
-        )}
-      </View>
-    );
   };
 
   const renderProgressSteps = () => (
@@ -454,7 +466,6 @@ function RequestCleanup({ onBack = () => {}, onSubmitRequest = () => {} }) {
 
   const renderOtherFields = () => (
     <View className="mt-6">
-      {/* Custom Problem Type */}
       <Text className='text-lg font-semibold text-gray-800 mb-4'>
         Specify Problem Type
       </Text>
@@ -483,50 +494,92 @@ function RequestCleanup({ onBack = () => {}, onSubmitRequest = () => {} }) {
         <Text className='text-red-500 text-sm mb-4'>{errors.customProblemType}</Text>
       )}
 
-      {/* Specific Location with Suggestions */}
       <Text className='text-lg font-semibold text-gray-800 mb-4'>
         Specific Location Details
       </Text>
-      <LocationInputWithSuggestions
-        value={formData.otherDetails.specificLocation}
-        onChangeText={(text) =>
-          setFormData({
-            ...formData,
-            otherDetails: {
-              ...formData.otherDetails,
-              specificLocation: text
-            }
-          })
-        }
-        placeholder="Provide detailed location information"
-        error={errors.specificLocation}
-        isOtherType={true}
-      />
-
-      <TouchableOpacity
-        className={`bg-green-100 border border-green-300 rounded-xl py-3 px-4 flex-row items-center justify-center mt-4 mb-6 ${
-          isLoadingLocation ? 'opacity-50' : ''
-        }`}
-        onPress={getCurrentLocation}
-        disabled={isLoadingLocation}
-      >
-        {isLoadingLocation ? (
-          <ActivityIndicator size="small" color="#10B981" />
-        ) : (
-          <Ionicons name='location-outline' size={20} color='#10B981' />
+      <View className='mb-2'>
+        <View
+          className={`bg-gray-50 rounded-xl px-4 py-4 border ${
+            errors.specificLocation ? "border-red-500" : "border-gray-200"
+          }`}
+        >
+          <TextInput
+            className='text-base text-gray-800'
+            placeholder="Type location or paste Google Maps link"
+            placeholderTextColor='#9CA3AF'
+            value={formData.otherDetails.specificLocation}
+            onChangeText={(text) => {
+              if (text.includes('google.com/maps') || text.includes('goo.gl/maps') || text.includes('maps.app.goo.gl')) {
+                const extractedLocation = extractLocationFromUrl(text);
+                if (extractedLocation) {
+                  setFormData({
+                    ...formData,
+                    otherDetails: {
+                      ...formData.otherDetails,
+                      specificLocation: extractedLocation
+                    }
+                  });
+                  Alert.alert('Location Extracted', `Location from map link: ${extractedLocation}`);
+                  return;
+                }
+              }
+              setFormData({
+                ...formData,
+                otherDetails: {
+                  ...formData.otherDetails,
+                  specificLocation: text
+                }
+              });
+              if (errors.specificLocation) {
+                setErrors({ ...errors, specificLocation: null });
+              }
+            }}
+            multiline
+            autoCapitalize="none"
+          />
+        </View>
+        {errors.specificLocation && (
+          <Text className='text-red-500 text-sm mt-1'>{errors.specificLocation}</Text>
         )}
-        <Text className='text-green-700 font-medium ml-2'>
-          {isLoadingLocation ? 'Getting Location...' : 'Use Current Location'}
-        </Text>
-      </TouchableOpacity>
+      </View>
+      <Text className='text-xs text-gray-500 mb-2 px-1'>
+        💡 Tip: You can paste a Google Maps URL to quickly add a location
+      </Text>
 
-      {/* Date and Time Selection */}
+      <View className='flex-row gap-3 mb-6'>
+        <TouchableOpacity
+          className={`flex-1 bg-green-100 border border-green-300 rounded-xl py-3 px-4 flex-row items-center justify-center ${
+            isLoadingLocation ? 'opacity-50' : ''
+          }`}
+          onPress={getCurrentLocation}
+          disabled={isLoadingLocation}
+        >
+          {isLoadingLocation ? (
+            <ActivityIndicator size="small" color="#10B981" />
+          ) : (
+            <Ionicons name='locate' size={18} color='#10B981' />
+          )}
+          <Text className='text-green-700 font-medium ml-2 text-sm'>
+            {isLoadingLocation ? 'Getting...' : 'Auto-Detect'}
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          className='flex-1 bg-blue-100 border border-blue-300 rounded-xl py-3 px-4 flex-row items-center justify-center'
+          onPress={openMapPicker}
+        >
+          <Ionicons name='map' size={18} color='#3B82F6' />
+          <Text className='text-blue-700 font-medium ml-2 text-sm'>
+            Pick on Map
+          </Text>
+        </TouchableOpacity>
+      </View>
+
       <Text className='text-lg font-semibold text-gray-800 mb-4'>
         Preferred Schedule
       </Text>
       
       <View className="flex-row gap-3 mb-4">
-        {/* Date Picker */}
         <View className="flex-1">
           <Text className='text-sm font-medium text-gray-700 mb-2'>
             Preferred Date
@@ -549,7 +602,6 @@ function RequestCleanup({ onBack = () => {}, onSubmitRequest = () => {} }) {
           )}
         </View>
 
-        {/* Time Picker */}
         <View className="flex-1">
           <Text className='text-sm font-medium text-gray-700 mb-2'>
             Preferred Time
@@ -584,7 +636,6 @@ function RequestCleanup({ onBack = () => {}, onSubmitRequest = () => {} }) {
         Select the type of problem and location
       </Text>
 
-      {/* Problem Type Selection */}
       <Text className='text-lg font-semibold text-gray-800 mb-4'>
         Problem Type
       </Text>
@@ -599,7 +650,6 @@ function RequestCleanup({ onBack = () => {}, onSubmitRequest = () => {} }) {
             }`}
             onPress={() => {
               setFormData({ ...formData, problemType: type.id });
-              // Clear errors when selection changes
               if (errors.problemType) {
                 setErrors({ ...errors, problemType: null });
               }
@@ -626,42 +676,78 @@ function RequestCleanup({ onBack = () => {}, onSubmitRequest = () => {} }) {
         <Text className='text-red-500 text-sm mb-4'>{errors.problemType}</Text>
       )}
 
-      {/* Show different content based on selection */}
       {formData.problemType === "other" ? (
         renderOtherFields()
       ) : (
         <View>
-          {/* Standard Location Input with Suggestions */}
           <Text className='text-lg font-semibold text-gray-800 mb-4'>Location</Text>
-          <View className='mb-4'>
-            <LocationInputWithSuggestions
-              value={formData.location}
-              onChangeText={(text) => setFormData({ ...formData, location: text })}
-              placeholder="Enter address or description of location"
-              error={errors.location}
-            />
-          </View>
-
-          <TouchableOpacity
-            className={`bg-green-100 border border-green-300 rounded-xl py-3 px-4 flex-row items-center justify-center mb-6 ${
-              isLoadingLocation ? 'opacity-50' : ''
-            }`}
-            onPress={getCurrentLocation}
-            disabled={isLoadingLocation}
-          >
-            {isLoadingLocation ? (
-              <ActivityIndicator size="small" color="#10B981" />
-            ) : (
-              <Ionicons name='location-outline' size={20} color='#10B981' />
+          <View className='mb-2'>
+            <View
+              className={`bg-gray-50 rounded-xl px-4 py-4 border ${
+                errors.location ? "border-red-500" : "border-gray-200"
+              }`}
+            >
+              <TextInput
+                className='text-base text-gray-800'
+                placeholder="Type location or paste Google Maps link"
+                placeholderTextColor='#9CA3AF'
+                value={formData.location}
+                onChangeText={(text) => {
+                  if (text.includes('google.com/maps') || text.includes('goo.gl/maps') || text.includes('maps.app.goo.gl')) {
+                    const extractedLocation = extractLocationFromUrl(text);
+                    if (extractedLocation) {
+                      setFormData({ ...formData, location: extractedLocation });
+                      Alert.alert('Location Extracted', `Location from map link: ${extractedLocation}`);
+                      return;
+                    }
+                  }
+                  setFormData({ ...formData, location: text });
+                  if (errors.location) {
+                    setErrors({ ...errors, location: null });
+                  }
+                }}
+                autoCapitalize="none"
+              />
+            </View>
+            {errors.location && (
+              <Text className='text-red-500 text-sm mt-1'>{errors.location}</Text>
             )}
-            <Text className='text-green-700 font-medium ml-2'>
-              {isLoadingLocation ? 'Getting Location...' : 'Use Current Location'}
-            </Text>
-          </TouchableOpacity>
+          </View>
+          <Text className='text-xs text-gray-500 mb-4 px-1'>
+            💡 Tip: You can paste a Google Maps URL to quickly add a location
+          </Text>
+
+          <View className='flex-row gap-3 mb-6'>
+            <TouchableOpacity
+              className={`flex-1 bg-green-100 border border-green-300 rounded-xl py-3 px-4 flex-row items-center justify-center ${
+                isLoadingLocation ? 'opacity-50' : ''
+              }`}
+              onPress={getCurrentLocation}
+              disabled={isLoadingLocation}
+            >
+              {isLoadingLocation ? (
+                <ActivityIndicator size="small" color="#10B981" />
+              ) : (
+                <Ionicons name='locate' size={18} color='#10B981' />
+              )}
+              <Text className='text-green-700 font-medium ml-2 text-sm'>
+                {isLoadingLocation ? 'Getting...' : 'Auto-Detect'}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              className='flex-1 bg-blue-100 border border-blue-300 rounded-xl py-3 px-4 flex-row items-center justify-center'
+              onPress={openMapPicker}
+            >
+              <Ionicons name='map' size={18} color='#3B82F6' />
+              <Text className='text-blue-700 font-medium ml-2 text-sm'>
+                Pick on Map
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
       )}
 
-      {/* Photo Section - Always visible */}
       <Text className='text-lg font-semibold text-gray-800 mb-4'>
         Add Photos (Optional)
       </Text>
@@ -693,7 +779,6 @@ function RequestCleanup({ onBack = () => {}, onSubmitRequest = () => {} }) {
         Help us prioritize your request
       </Text>
 
-      {/* Severity Selection */}
       <View className='mb-6'>
         {severityLevels.map((level) => (
           <TouchableOpacity
@@ -741,7 +826,6 @@ function RequestCleanup({ onBack = () => {}, onSubmitRequest = () => {} }) {
         <Text className='text-red-500 text-sm mb-4'>{errors.severity}</Text>
       )}
 
-      {/* Description */}
       <Text className='text-lg font-semibold text-gray-800 mb-4'>
         Additional Details
       </Text>
@@ -807,7 +891,6 @@ function RequestCleanup({ onBack = () => {}, onSubmitRequest = () => {} }) {
         </View>
       </View>
 
-      {/* Summary */}
       <View className='bg-green-50 border border-green-200 rounded-xl p-4 mt-6'>
         <Text className='font-semibold text-green-800 mb-2'>
           Request Summary
@@ -853,7 +936,6 @@ function RequestCleanup({ onBack = () => {}, onSubmitRequest = () => {} }) {
         keyboardShouldPersistTaps="handled"
       >
         <View className='flex-1 px-6 pt-12'>
-          {/* Header */}
           <View className='flex-row items-center justify-between mb-6'>
             <TouchableOpacity onPress={handleBack} className='p-2 -ml-2'>
               <Ionicons name='arrow-back' size={24} color='#374151' />
@@ -864,29 +946,38 @@ function RequestCleanup({ onBack = () => {}, onSubmitRequest = () => {} }) {
             <View className='w-8' />
           </View>
 
-          {/* Progress Steps */}
           {renderProgressSteps()}
 
-          {/* Step Content */}
           <View className='flex-1'>
             {currentStep === 1 && renderStep1()}
             {currentStep === 2 && renderStep2()}
             {currentStep === 3 && renderStep3()}
           </View>
 
-          {/* Navigation Buttons */}
           <View className='py-6'>
             <TouchableOpacity
-              className='bg-green-600 rounded-xl py-4 mb-4 shadow-lg'
+              className={`bg-green-600 rounded-xl py-4 mb-4 shadow-lg ${
+                isSubmitting ? 'opacity-50' : ''
+              }`}
               onPress={handleNext}
               activeOpacity={0.8}
+              disabled={isSubmitting}
             >
-              <Text className='text-white text-lg font-semibold text-center'>
-                {currentStep === 3 ? "Submit Request" : "Continue"}
-              </Text>
+              {isSubmitting ? (
+                <View className='flex-row items-center justify-center'>
+                  <ActivityIndicator size="small" color="#ffffff" />
+                  <Text className='text-white text-lg font-semibold ml-2'>
+                    Submitting...
+                  </Text>
+                </View>
+              ) : (
+                <Text className='text-white text-lg font-semibold text-center'>
+                  {currentStep === 3 ? "Submit Request" : "Continue"}
+                </Text>
+              )}
             </TouchableOpacity>
 
-            {currentStep > 1 && (
+            {currentStep > 1 && !isSubmitting && (
               <TouchableOpacity
                 className='bg-white border border-gray-300 rounded-xl py-4 shadow-sm'
                 onPress={() => setCurrentStep(currentStep - 1)}
@@ -900,6 +991,66 @@ function RequestCleanup({ onBack = () => {}, onSubmitRequest = () => {} }) {
           </View>
         </View>
       </ScrollView>
+
+      <Modal
+        visible={showMapModal}
+        animationType="slide"
+        onRequestClose={() => setShowMapModal(false)}
+      >
+        <View className='flex-1'>
+          <View className='bg-white border-b border-gray-200 pt-12 pb-4 px-6'>
+            <View className='flex-row items-center justify-between'>
+              <TouchableOpacity onPress={() => setShowMapModal(false)}>
+                <Ionicons name='close' size={28} color='#374151' />
+              </TouchableOpacity>
+              <Text className='text-lg font-semibold text-gray-900'>
+                Select Location
+              </Text>
+              <TouchableOpacity onPress={confirmMapLocation}>
+                <Text className='text-green-600 font-semibold text-lg'>Done</Text>
+              </TouchableOpacity>
+            </View>
+            <Text className='text-sm text-gray-600 mt-2 text-center'>
+              Tap anywhere on the map to select a location
+            </Text>
+          </View>
+
+          {mapRegion && (
+            <MapView
+              provider={PROVIDER_GOOGLE}
+              style={{ flex: 1 }}
+              initialRegion={mapRegion}
+              onPress={handleMapPress}
+              showsUserLocation
+              showsMyLocationButton
+            >
+              {selectedLocation && (
+                <Marker
+                  coordinate={selectedLocation}
+                  draggable
+                  onDragEnd={(e) => setSelectedLocation(e.nativeEvent.coordinate)}
+                >
+                  <View className='items-center'>
+                    <Ionicons name='location' size={40} color='#EF4444' />
+                  </View>
+                </Marker>
+              )}
+            </MapView>
+          )}
+
+          <View className='absolute bottom-8 left-6 right-6'>
+            <TouchableOpacity
+              className='bg-green-600 rounded-xl py-4 shadow-lg flex-row items-center justify-center'
+              onPress={confirmMapLocation}
+            >
+              <Ionicons name='checkmark-circle' size={24} color='white' />
+              <Text className='text-white text-lg font-semibold ml-2'>
+                Confirm Location
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
