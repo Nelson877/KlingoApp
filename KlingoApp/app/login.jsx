@@ -63,14 +63,15 @@ function Login({ onLogin = () => {}, onNavigateToSignup = () => {}, onNavigateTo
   const [showPassword, setShowPassword] = useState(false);
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
-  const [connectionStatus, setConnectionStatus] = useState('checking');
+  const [connectionStatus, setConnectionStatus] = useState('connected'); // Changed from 'checking' to 'connected'
   const [rememberMe, setRememberMe] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [successData, setSuccessData] = useState({ title: '', message: '', user: null });
 
   // Check server connection on component mount (silently)
   useEffect(() => {
-    checkServerConnection();
+    // COMMENTED OUT - Only check connection when user tries to login
+    // checkServerConnection();
     loadSavedCredentials();
   }, []);
 
@@ -91,9 +92,11 @@ function Login({ onLogin = () => {}, onNavigateToSignup = () => {}, onNavigateTo
           ]
         );
       }
+      return isConnected;
     } catch (error) {
       console.error('❌ Connection check failed:', error);
       setConnectionStatus('disconnected');
+      return false;
     }
   };
 

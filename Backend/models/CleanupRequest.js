@@ -12,7 +12,7 @@ const cleanupRequestSchema = new mongoose.Schema({
   },
   problemLabel: {
     type: String,
-    required: true
+    required: false // Changed to false since it's auto-generated
   },
   location: {
     type: String,

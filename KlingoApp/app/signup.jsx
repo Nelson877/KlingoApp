@@ -66,13 +66,13 @@ function SignUp({ onSignUp = () => {}, onNavigateToLogin = () => {} }) {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
-  const [connectionStatus, setConnectionStatus] = useState('checking');
+  const [connectionStatus, setConnectionStatus] = useState('connected'); // ✅ CHANGED FROM 'checking'
   const [showSuccessModal, setShowSuccessModal] = useState(false);
-  const [registrationResponse, setRegistrationResponse] = useState(null); // Store the registration response
+  const [registrationResponse, setRegistrationResponse] = useState(null);
 
-  // Check server connection on component mount (silently)
+  // ✅ FIXED: Commented out server connection check on mount
   useEffect(() => {
-    checkServerConnection();
+    // checkServerConnection(); // ✅ COMMENTED OUT - Only check when user tries to sign up
   }, []);
 
   const checkServerConnection = async () => {
@@ -81,7 +81,6 @@ function SignUp({ onSignUp = () => {}, onNavigateToLogin = () => {} }) {
       const isConnected = await ApiService.testConnection();
       setConnectionStatus(isConnected ? 'connected' : 'disconnected');
       
-      // Only show alert if there's a connection issue
       if (!isConnected) {
         Alert.alert(
           "Connection Issue",
@@ -92,9 +91,11 @@ function SignUp({ onSignUp = () => {}, onNavigateToLogin = () => {} }) {
           ]
         );
       }
+      return isConnected; // ✅ ADDED return statement
     } catch (error) {
       console.error('❌ Connection check failed:', error);
       setConnectionStatus('disconnected');
+      return false; // ✅ ADDED return statement
     }
   };
 
@@ -147,7 +148,6 @@ function SignUp({ onSignUp = () => {}, onNavigateToLogin = () => {} }) {
     setErrors({});
 
     try {
-      // Get device info
       const deviceInfo = Platform.OS === 'ios' ? 'iPhone' : 'Android';
       
       const userData = {
@@ -156,7 +156,7 @@ function SignUp({ onSignUp = () => {}, onNavigateToLogin = () => {} }) {
         password,
         deviceInfo,
         platform: Platform.OS,
-        appVersion: '1.0.0', // You can get this from your app config
+        appVersion: '1.0.0',
       };
 
       console.log('📤 Sending registration data...');
@@ -165,14 +165,10 @@ function SignUp({ onSignUp = () => {}, onNavigateToLogin = () => {} }) {
       if (response.token) {
         console.log('✅ Registration successful, storing user data...');
         
-        // Store token and user data
         await AsyncStorage.setItem('userToken', response.token);
         await AsyncStorage.setItem('userData', JSON.stringify(response.user));
 
-        // Store the complete registration response for later use
         setRegistrationResponse(response);
-
-        // Show custom success modal instead of Alert.alert
         setShowSuccessModal(true);
       } else {
         throw new Error('Registration response missing token');
@@ -183,7 +179,6 @@ function SignUp({ onSignUp = () => {}, onNavigateToLogin = () => {} }) {
       let errorMessage = "Registration failed. Please try again.";
       let fieldErrors = {};
       
-      // Handle specific error types
       if (error.message.includes('already exists') || error.message.includes('already registered')) {
         errorMessage = "An account with this email already exists. Please try logging in instead.";
         fieldErrors.email = "This email is already registered";
@@ -220,12 +215,10 @@ function SignUp({ onSignUp = () => {}, onNavigateToLogin = () => {} }) {
     console.log('✅ Calling onSignUp callback with user data');
     setShowSuccessModal(false);
     
-    // Pass the user data from the registration response
     if (registrationResponse && registrationResponse.user) {
       console.log('✅ Passing user data to parent component:', registrationResponse.user);
       onSignUp(registrationResponse.user);
     } else {
-      // Fallback: try to get from AsyncStorage
       console.log('⚠️ No registration response, trying AsyncStorage...');
       const getUserDataAndProceed = async () => {
         try {
@@ -271,7 +264,6 @@ function SignUp({ onSignUp = () => {}, onNavigateToLogin = () => {} }) {
           value={value}
           onChangeText={(text) => {
             onChangeText(text);
-            // Clear error when user starts typing
             if (errors[options.errorKey]) {
               setErrors(prev => ({ ...prev, [options.errorKey]: null }));
             }

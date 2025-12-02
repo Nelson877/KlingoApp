@@ -9,8 +9,8 @@ import SignUp from "./signup";
 import ForgotPassword from "./forgot-password";
 import RequestCleanup from "./request-cleanup";
 import HomeScreen from "./(tabs)/home";
-import ProfileScreen from "../app/(tabs)/profile";
-import SettingsScreen from "../app/(tabs)//settings";
+import ProfileScreen from "./(tabs)/profile";
+import SettingsScreen from "./(tabs)/settings";
 
 // Loading Component
 function LoadingScreen({ message = "Loading..." }) {
@@ -37,7 +37,7 @@ function LoadingScreen({ message = "Loading..." }) {
   );
 }
 
-function RootLayout() {
+export default function Index() {
   const [currentScreen, setCurrentScreen] = useState("splash");
   const [currentUser, setCurrentUser] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -288,5 +288,4 @@ function RootLayout() {
   // Fallback (shouldn't reach here)
   return null;
 }
-
-export default RootLayout;
+// export default RootLayout;

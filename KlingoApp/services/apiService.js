@@ -17,11 +17,19 @@ const getApiBaseUrl = () => {
 
 const API_BASE_URL = getApiBaseUrl();
 
+// Timeout configurations for different request types
+const TIMEOUTS = {
+  DEFAULT: 30000,      // 30 seconds
+  AUTH: 120000,         // 60 seconds for login/register
+  UPLOAD: 120000,      // 2 minutes for file uploads
+  LONG_POLL: 180000,   // 3 minutes for long operations
+};
+
 // Enhanced error messages for better user experience
 const USER_FRIENDLY_MESSAGES = {
   NETWORK_ERROR: 'No internet connection. Please check your network and try again.',
   SERVER_ERROR: 'We\'re experiencing some technical difficulties. Please try again in a moment.',
-  TIMEOUT_ERROR: 'This is taking longer than usual. Please try again.',
+  TIMEOUT_ERROR: 'This is taking longer than usual. Please check your connection and try again.',
   AUTH_ERROR: 'Your session has expired. Please sign in again.',
   PERMISSION_ERROR: 'You don\'t have access to this feature.',
   NOT_FOUND: 'We couldn\'t find what you\'re looking for.',
@@ -43,6 +51,7 @@ const USER_FRIENDLY_MESSAGES = {
   REGISTER_WEAK_PASSWORD: 'Let\'s make your password stronger! Try adding more characters, numbers, or symbols.',
   REGISTER_INVALID_EMAIL: 'That email doesn\'t look quite right. Mind checking it?',
   REGISTER_TERMS_NOT_ACCEPTED: 'Just need you to accept our terms and conditions to continue.',
+  PASSWORD_MISMATCH: 'Passwords don\'t match. Please make sure both passwords are the same.',
   
   // Success messages
   LOGIN_SUCCESS: '🎉 Welcome back! Great to see you again.',
@@ -63,6 +72,7 @@ class ApiService {
     this.requestQueue = new Map();
     this.retryQueue = new Map();
     this.isOnline = true;
+    this.activeControllers = new Map();
     console.log(`API Base URL initialized: ${this.baseURL}`);
     console.log(`Platform: ${Platform.OS}`);
     console.log(`Development mode: ${__DEV__}`);
@@ -221,34 +231,61 @@ class ApiService {
     return error;
   }
 
+  getTimeoutForEndpoint(endpoint, method) {
+    // Auth endpoints get longer timeout
+    if (endpoint.includes('/auth/login') || endpoint.includes('/auth/register')) {
+      return TIMEOUTS.AUTH;
+    }
+    
+    // Upload endpoints get even longer timeout
+    if (method === 'POST' && endpoint.includes('/upload')) {
+      return TIMEOUTS.UPLOAD;
+    }
+    
+    // Default timeout
+    return TIMEOUTS.DEFAULT;
+  }
+
   async request(endpoint, options = {}) {
     const requestId = `${options.method || 'GET'}_${endpoint}_${Date.now()}`;
+    const timeout = this.getTimeoutForEndpoint(endpoint, options.method);
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000);
+    
+    // Store controller for potential cleanup
+    this.activeControllers.set(requestId, controller);
+    
+    const timeoutId = setTimeout(() => {
+      console.log(`Request timeout after ${timeout}ms: ${endpoint}`);
+      controller.abort();
+    }, timeout);
 
     if (!options.method || options.method === 'GET') {
       const existingRequest = this.requestQueue.get(endpoint);
       if (existingRequest) {
         console.log('Using existing request for:', endpoint);
+        clearTimeout(timeoutId);
+        this.activeControllers.delete(requestId);
         return existingRequest;
       }
     }
 
-    const requestPromise = this._makeRequest(endpoint, options, controller);
+    const requestPromise = this._makeRequest(endpoint, options, controller, requestId);
     
     if (!options.method || options.method === 'GET') {
       this.requestQueue.set(endpoint, requestPromise);
-      
-      requestPromise.finally(() => {
-        this.requestQueue.delete(endpoint);
-        clearTimeout(timeoutId);
-      });
     }
+      
+    // Always clean up after request completes
+    requestPromise.finally(() => {
+      this.requestQueue.delete(endpoint);
+      this.activeControllers.delete(requestId);
+      clearTimeout(timeoutId);
+    });
 
     return requestPromise;
   }
 
-  async _makeRequest(endpoint, options, controller, retryCount = 0) {
+  async _makeRequest(endpoint, options, controller, requestId, retryCount = 0) {
     const maxRetries = 3;
     
     try {
@@ -279,38 +316,59 @@ class ApiService {
       return await this.handleResponse(response);
       
     } catch (error) {
-      console.error(`API Request Error (attempt ${retryCount + 1}):`, error);
+      console.error(`API Request Error (attempt ${retryCount + 1}/${maxRetries + 1}):`, error.message);
       
+      // Handle abort/timeout
       if (error.name === 'AbortError') {
-        const timeoutError = new Error();
-        timeoutError.message = 'Request timeout';
+        const timeoutError = new Error('Request timeout');
+        timeoutError.name = 'TimeoutError';
         timeoutError.userMessage = USER_FRIENDLY_MESSAGES.TIMEOUT_ERROR;
+        timeoutError.suggestions = [
+          'Check your internet connection',
+          'Try again in a moment',
+          'Make sure your server is running'
+        ];
         throw timeoutError;
       }
       
+      // Handle network errors with retry
       if (this._isNetworkError(error)) {
         this.isOnline = false;
-        const networkError = new Error();
-        networkError.message = 'Network error';
-        networkError.userMessage = USER_FRIENDLY_MESSAGES.LOGIN_NETWORK_ISSUE;
-        networkError.suggestions = ['Check your internet connection', 'Try connecting to WiFi', 'Move to a better signal area'];
         
-        if (retryCount < maxRetries && this._shouldRetry(error)) {
+        // Retry logic
+        if (retryCount < maxRetries && this._shouldRetry(error, options.method)) {
           const backoffDelay = Math.min(1000 * Math.pow(2, retryCount), 10000);
-          console.log(`Retrying request in ${backoffDelay}ms...`);
+          console.log(`Retrying request in ${backoffDelay}ms... (attempt ${retryCount + 1}/${maxRetries})`);
           await new Promise(resolve => setTimeout(resolve, backoffDelay));
-          return this._makeRequest(endpoint, options, controller, retryCount + 1);
+          
+          // Create new controller for retry
+          const newController = new AbortController();
+          this.activeControllers.set(requestId, newController);
+          
+          return this._makeRequest(endpoint, options, newController, requestId, retryCount + 1);
         }
         
+        // Max retries reached
+        const networkError = new Error('Network error');
+        networkError.name = 'NetworkError';
+        networkError.userMessage = USER_FRIENDLY_MESSAGES.LOGIN_NETWORK_ISSUE;
+        networkError.suggestions = [
+          'Check your internet connection',
+          'Make sure your server is running',
+          'Verify your API URL is correct',
+          'Try connecting to WiFi'
+        ];
         throw networkError;
       }
       
+      // Pass through errors with userMessage
       if (error.userMessage) {
         throw error;
       }
       
-      const genericError = new Error();
-      genericError.message = error.message || 'Unknown error';
+      // Generic error
+      const genericError = new Error(error.message || 'Unknown error');
+      genericError.name = error.name || 'UnknownError';
       genericError.userMessage = USER_FRIENDLY_MESSAGES.UNKNOWN_ERROR;
       throw genericError;
     }
@@ -318,14 +376,22 @@ class ApiService {
 
   _isNetworkError(error) {
     return error.name === 'AbortError' || 
+           error.name === 'TimeoutError' ||
            error.message.includes('Network request failed') ||
            error.message.includes('fetch') ||
            error.message.includes('timeout') ||
-           error.message.includes('connection');
+           error.message.includes('connection') ||
+           error.message.includes('ECONNREFUSED') ||
+           error.message.includes('ETIMEDOUT');
   }
 
-  _shouldRetry(error) {
-    return this._isNetworkError(error) && !error.userMessage;
+  _shouldRetry(error, method) {
+    // Only retry GET requests and network errors
+    const isGetRequest = !method || method === 'GET';
+    const isNetworkError = this._isNetworkError(error);
+    const hasNoUserMessage = !error.userMessage;
+    
+    return isNetworkError && hasNoUserMessage && isGetRequest;
   }
 
   async testConnection() {
@@ -392,9 +458,15 @@ class ApiService {
       return result;
     } catch (error) {
       console.error('Registration failed:', error);
-      const registrationError = new Error(error.message);
+      
+      // Create a new error with proper message handling
+      const registrationError = new Error(error.message || 'Registration failed');
+      registrationError.name = error.name || 'RegistrationError';
+      registrationError.status = error.status;
       registrationError.userMessage = error.userMessage || USER_FRIENDLY_MESSAGES.UNKNOWN_ERROR;
       registrationError.validationErrors = error.validationErrors;
+      registrationError.suggestions = error.suggestions || ['Check your connection', 'Make sure the server is running', 'Try again'];
+      
       throw registrationError;
     }
   }
@@ -428,8 +500,13 @@ class ApiService {
       return result;
     } catch (error) {
       console.error('Login failed:', error);
-      const loginError = new Error(error.message);
+      
+      const loginError = new Error(error.message || 'Login failed');
+      loginError.name = error.name || 'LoginError';
+      loginError.status = error.status;
       loginError.userMessage = error.userMessage || USER_FRIENDLY_MESSAGES.LOGIN_INVALID_CREDENTIALS;
+      loginError.suggestions = error.suggestions || ['Check your email and password', 'Make sure you have an account'];
+      
       throw loginError;
     }
   }
@@ -593,6 +670,100 @@ class ApiService {
     }
     
     return null;
+  }
+
+  // ===== USER PROFILE METHODS =====
+
+  async getCurrentUser() {
+    console.log('Fetching current user profile...');
+    try {
+      const result = await this.request('/api/auth/me');
+      console.log('Current user fetched successfully');
+      return result;
+    } catch (error) {
+      console.error('Failed to fetch current user:', error);
+      const fetchError = new Error(error.message);
+      fetchError.userMessage = error.userMessage || 'Failed to load your profile. Please try again.';
+      throw fetchError;
+    }
+  }
+
+  async updateUser(userId, userData) {
+    console.log('Updating user profile:', userId);
+    try {
+      const result = await this.request(`/api/users/${userId}`, {
+        method: 'PATCH',
+        body: JSON.stringify(userData),
+      });
+      
+      console.log('User profile updated successfully');
+      
+      // Update stored user data if it's the current user
+      const storedUser = await this.getStoredUserData();
+      if (storedUser && storedUser.id === userId) {
+        const updatedUser = { ...storedUser, ...userData };
+        await AsyncStorage.setItem('userData', JSON.stringify(updatedUser));
+      }
+      
+      result.userMessage = USER_FRIENDLY_MESSAGES.UPDATE_SUCCESS;
+      return result;
+    } catch (error) {
+      console.error('Failed to update user profile:', error);
+      const updateError = new Error(error.message);
+      updateError.userMessage = error.userMessage || 'Failed to update your profile. Please try again.';
+      throw updateError;
+    }
+  }
+
+  async updateUserProfile(userData) {
+    console.log('Updating current user profile...');
+    try {
+      const result = await this.request('/api/users/profile', {
+        method: 'PATCH',
+        body: JSON.stringify(userData),
+      });
+      
+      console.log('Profile updated successfully');
+      
+      // Update stored user data
+      if (result.user || result.data) {
+        const updatedUser = result.user || result.data;
+        await AsyncStorage.setItem('userData', JSON.stringify(updatedUser));
+      }
+      
+      result.userMessage = USER_FRIENDLY_MESSAGES.UPDATE_SUCCESS;
+      return result;
+    } catch (error) {
+      console.error('Failed to update profile:', error);
+      const updateError = new Error(error.message);
+      updateError.userMessage = error.userMessage || 'Failed to update your profile. Please try again.';
+      throw updateError;
+    }
+  }
+
+  async changePassword(currentPassword, newPassword) {
+    console.log('Changing password...');
+    try {
+      if (newPassword.length < 8) {
+        const error = new Error('Password too short');
+        error.userMessage = USER_FRIENDLY_MESSAGES.REGISTER_WEAK_PASSWORD;
+        throw error;
+      }
+
+      const result = await this.request('/api/users/change-password', {
+        method: 'POST',
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+      
+      console.log('Password changed successfully');
+      result.userMessage = '✅ Password changed successfully!';
+      return result;
+    } catch (error) {
+      console.error('Failed to change password:', error);
+      const changeError = new Error(error.message);
+      changeError.userMessage = error.userMessage || 'Failed to change password. Please try again.';
+      throw changeError;
+    }
   }
 
   // ===== CLEANUP REQUEST METHODS =====
@@ -829,6 +1000,17 @@ class ApiService {
     }
 
     return formatted;
+  }
+
+  // Cancel all pending requests (useful for cleanup on unmount)
+  cancelAllRequests() {
+    console.log(`Cancelling ${this.activeControllers.size} active requests`);
+    this.activeControllers.forEach((controller, requestId) => {
+      console.log(`Cancelling request: ${requestId}`);
+      controller.abort();
+    });
+    this.activeControllers.clear();
+    this.requestQueue.clear();
   }
 }
 

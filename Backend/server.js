@@ -22,6 +22,9 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // Request logging
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+  if (req.body && Object.keys(req.body).length > 0) {
+    console.log('Request body:', JSON.stringify(req.body, null, 2));
+  }
   next();
 });
 
@@ -153,28 +156,22 @@ app.post('/api/auth/login', async (req, res) => {
 
 // ===== CLEANUP REQUEST ROUTES =====
 
-// Statistics route FIRST (before parameterized routes)
-app.get('/api/cleanup-requests/stats/summary', async (req, res) => {
+// Statistics route - MUST BE BEFORE :id routes
+app.get('/api/cleanup-requests/stats', async (req, res) => {
   try {
-    const totalRequests = await CleanupRequest.countDocuments();
-    const pendingRequests = await CleanupRequest.countDocuments({ status: 'pending' });
-    const inProgressRequests = await CleanupRequest.countDocuments({ status: 'in-progress' });
-    const completedRequests = await CleanupRequest.countDocuments({ status: 'completed' });
+    const stats = await CleanupRequest.getStats();
     
-    const completionRate = totalRequests > 0 
-      ? Math.round((completedRequests / totalRequests) * 100) 
-      : 0;
-
     res.json({
-      total: totalRequests,
-      pending: pendingRequests,
-      'in-progress': inProgressRequests,
-      completed: completedRequests,
-      completionRate
+      success: true,
+      data: stats
     });
   } catch (error) {
     console.error('Stats error:', error);
-    res.status(500).json({ message: 'Server error fetching statistics' });
+    res.status(500).json({ 
+      success: false,
+      message: 'Server error fetching statistics',
+      error: error.message 
+    });
   }
 });
 
@@ -184,20 +181,29 @@ app.get('/api/cleanup-requests/recent', async (req, res) => {
     const limit = parseInt(req.query.limit) || 10;
     
     const recentRequests = await CleanupRequest.find()
-      .sort({ submittedAt: -1 })
+      .sort({ createdAt: -1 })
       .limit(limit)
-      .select('problemType problemLabel location severity status submittedAt contactInfo');
+      .select('problemType problemLabel location severity status createdAt contactInfo');
 
-    res.json(recentRequests);
+    res.json({
+      success: true,
+      data: recentRequests
+    });
   } catch (error) {
     console.error('Recent requests error:', error);
-    res.status(500).json({ message: 'Server error fetching recent requests' });
+    res.status(500).json({ 
+      success: false,
+      message: 'Server error fetching recent requests',
+      error: error.message 
+    });
   }
 });
 
 // Submit new cleanup request
 app.post('/api/cleanup-requests', async (req, res) => {
   try {
+    console.log('Received cleanup request submission:', req.body);
+
     const {
       problemType,
       location,
@@ -210,18 +216,20 @@ app.post('/api/cleanup-requests', async (req, res) => {
       deviceInfo
     } = req.body;
 
-    // Basic validation
+    // Validation with detailed error messages
+    const validationErrors = [];
+
     if (!problemType) {
-      return res.status(400).json({ message: 'Problem type is required' });
+      validationErrors.push('Problem type is required');
     }
     if (!severity) {
-      return res.status(400).json({ message: 'Severity is required' });
+      validationErrors.push('Severity is required');
     }
-    if (!description?.trim()) {
-      return res.status(400).json({ message: 'Description is required' });
+    if (!description || !description.trim()) {
+      validationErrors.push('Description is required');
     }
-    if (!contactInfo?.phone?.trim()) {
-      return res.status(400).json({ message: 'Contact phone is required' });
+    if (!contactInfo || !contactInfo.phone || !contactInfo.phone.trim()) {
+      validationErrors.push('Contact phone is required');
     }
 
     // Location validation
@@ -229,10 +237,19 @@ app.post('/api/cleanup-requests', async (req, res) => {
       ? otherDetails?.specificLocation 
       : location;
       
-    if (!requestLocation?.trim()) {
-      return res.status(400).json({ message: 'Location is required' });
+    if (!requestLocation || !requestLocation.trim()) {
+      validationErrors.push('Location is required');
     }
 
+    if (validationErrors.length > 0) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'Validation failed',
+        errors: validationErrors 
+      });
+    }
+
+    // Create cleanup request
     const cleanupRequest = new CleanupRequest({
       problemType,
       location: requestLocation.trim(),
@@ -244,48 +261,73 @@ app.post('/api/cleanup-requests', async (req, res) => {
         email: contactInfo.email?.trim() || ''
       },
       photos: photos || [],
-      otherDetails: otherDetails || {},
+      otherDetails: problemType === 'other' ? otherDetails : {},
       coordinates: coordinates || {},
       deviceInfo: deviceInfo || ''
     });
 
-    await cleanupRequest.save();
+    const savedRequest = await cleanupRequest.save();
+
+    console.log('Cleanup request saved successfully:', savedRequest._id);
 
     res.status(201).json({
+      success: true,
       message: 'Cleanup request submitted successfully',
-      request: cleanupRequest,
-      id: cleanupRequest._id
+      data: savedRequest,
+      id: savedRequest._id
     });
 
   } catch (error) {
     console.error('Submit cleanup request error:', error);
-    res.status(500).json({ message: 'Server error submitting cleanup request' });
+    
+    // Handle mongoose validation errors
+    if (error.name === 'ValidationError') {
+      const errors = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({ 
+        success: false,
+        message: 'Validation failed',
+        errors 
+      });
+    }
+
+    res.status(500).json({ 
+      success: false,
+      message: 'Server error submitting cleanup request',
+      error: error.message 
+    });
   }
 });
 
-// Get all cleanup requests
+// Get all cleanup requests with filters
 app.get('/api/cleanup-requests', async (req, res) => {
   try {
     const { 
       page = 1, 
-      limit = 20,
+      limit = 50,
       status,
-      severity 
+      severity,
+      problemType
     } = req.query;
+
+    console.log('Fetching cleanup requests with filters:', { status, severity, problemType });
 
     const filters = {};
     if (status && status !== 'all') filters.status = status;
     if (severity && severity !== 'all') filters.severity = severity;
+    if (problemType && problemType !== 'all') filters.problemType = problemType;
 
     const requests = await CleanupRequest.find(filters)
-      .sort({ submittedAt: -1 })
+      .sort({ createdAt: -1 })
       .limit(parseInt(limit))
       .skip((parseInt(page) - 1) * parseInt(limit));
 
     const total = await CleanupRequest.countDocuments(filters);
 
+    console.log(`Found ${requests.length} requests (total: ${total})`);
+
     res.json({
-      requests,
+      success: true,
+      data: requests,
       pagination: {
         currentPage: parseInt(page),
         totalPages: Math.ceil(total / parseInt(limit)),
@@ -294,26 +336,43 @@ app.get('/api/cleanup-requests', async (req, res) => {
     });
   } catch (error) {
     console.error('Get cleanup requests error:', error);
-    res.status(500).json({ message: 'Server error fetching cleanup requests' });
+    res.status(500).json({ 
+      success: false,
+      message: 'Server error fetching cleanup requests',
+      error: error.message 
+    });
   }
 });
 
-// Get single cleanup request - AFTER static routes
+// Get single cleanup request by ID
 app.get('/api/cleanup-requests/:id', async (req, res) => {
   try {
     const request = await CleanupRequest.findById(req.params.id);
 
     if (!request) {
-      return res.status(404).json({ message: 'Cleanup request not found' });
+      return res.status(404).json({ 
+        success: false,
+        message: 'Cleanup request not found' 
+      });
     }
 
-    res.json(request);
+    res.json({
+      success: true,
+      data: request
+    });
   } catch (error) {
     console.error('Get cleanup request error:', error);
     if (error.name === 'CastError') {
-      return res.status(404).json({ message: 'Cleanup request not found' });
+      return res.status(404).json({ 
+        success: false,
+        message: 'Cleanup request not found' 
+      });
     }
-    res.status(500).json({ message: 'Server error fetching cleanup request' });
+    res.status(500).json({ 
+      success: false,
+      message: 'Server error fetching cleanup request',
+      error: error.message 
+    });
   }
 });
 
@@ -323,46 +382,374 @@ app.patch('/api/cleanup-requests/:id/status', async (req, res) => {
     const { status, adminNotes } = req.body;
 
     if (!['pending', 'in-progress', 'completed', 'cancelled'].includes(status)) {
-      return res.status(400).json({ message: 'Invalid status' });
+      return res.status(400).json({ 
+        success: false,
+        message: 'Invalid status' 
+      });
     }
 
-    const updateData = { 
-      status, 
-      updatedAt: new Date() 
-    };
+    const request = await CleanupRequest.findById(req.params.id);
     
-    if (adminNotes) updateData.adminNotes = adminNotes;
-    if (status === 'completed') updateData.actualCompletion = new Date();
-
-    const request = await CleanupRequest.findByIdAndUpdate(
-      req.params.id,
-      updateData,
-      { new: true }
-    );
-
     if (!request) {
-      return res.status(404).json({ message: 'Cleanup request not found' });
+      return res.status(404).json({ 
+        success: false,
+        message: 'Cleanup request not found' 
+      });
     }
+
+    // Use the model's updateStatus method
+    await request.updateStatus(status, adminNotes);
 
     res.json({
+      success: true,
       message: 'Status updated successfully',
-      request
+      data: request
     });
 
   } catch (error) {
     console.error('Update status error:', error);
-    res.status(500).json({ message: 'Server error updating status' });
+    res.status(500).json({ 
+      success: false,
+      message: 'Server error updating status',
+      error: error.message 
+    });
+  }
+});
+
+// Assign request
+app.patch('/api/cleanup-requests/:id/assign', async (req, res) => {
+  try {
+    const { assignedTo, estimatedCompletion } = req.body;
+
+    if (!assignedTo) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'Assignee is required' 
+      });
+    }
+
+    const request = await CleanupRequest.findById(req.params.id);
+    
+    if (!request) {
+      return res.status(404).json({ 
+        success: false,
+        message: 'Cleanup request not found' 
+      });
+    }
+
+    // Use the model's assignTo method
+    await request.assignTo(assignedTo, estimatedCompletion);
+
+    res.json({
+      success: true,
+      message: 'Request assigned successfully',
+      data: request
+    });
+
+  } catch (error) {
+    console.error('Assign request error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Server error assigning request',
+      error: error.message 
+    });
+  }
+});
+
+// Delete request
+app.delete('/api/cleanup-requests/:id', async (req, res) => {
+  try {
+    const request = await CleanupRequest.findByIdAndDelete(req.params.id);
+
+    if (!request) {
+      return res.status(404).json({ 
+        success: false,
+        message: 'Cleanup request not found' 
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Cleanup request deleted successfully',
+      data: { id: req.params.id }
+    });
+
+  } catch (error) {
+    console.error('Delete request error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Server error deleting request',
+      error: error.message 
+    });
   }
 });
 
 // ===== USER ROUTES =====
+
+// Get current user profile (authenticated)
+app.get('/api/auth/me', authenticateToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId).select('-password -resetPasswordToken');
+    
+    if (!user) {
+      return res.status(404).json({ 
+        success: false,
+        message: 'User not found' 
+      });
+    }
+
+    res.json({
+      success: true,
+      data: user.profile
+    });
+  } catch (error) {
+    console.error('Get current user error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Server error fetching user profile',
+      error: error.message 
+    });
+  }
+});
+
+// Update user profile (authenticated - own profile)
+app.patch('/api/users/profile', authenticateToken, async (req, res) => {
+  try {
+    const { name, phone, location } = req.body;
+
+    const updateData = {};
+    if (name !== undefined) updateData.name = name.trim();
+    if (phone !== undefined) updateData.phone = phone.trim();
+    if (location !== undefined) updateData.location = location.trim();
+
+    const user = await User.findByIdAndUpdate(
+      req.user.userId,
+      updateData,
+      { new: true, runValidators: true }
+    ).select('-password -resetPasswordToken');
+
+    if (!user) {
+      return res.status(404).json({ 
+        success: false,
+        message: 'User not found' 
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Profile updated successfully',
+      data: user.profile
+    });
+  } catch (error) {
+    console.error('Update profile error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Server error updating profile',
+      error: error.message 
+    });
+  }
+});
+
+// Change password (authenticated)
+app.post('/api/users/change-password', authenticateToken, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'Current password and new password are required' 
+      });
+    }
+
+    if (newPassword.length < 8) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'New password must be at least 8 characters long' 
+      });
+    }
+
+    const user = await User.findById(req.user.userId);
+    
+    if (!user) {
+      return res.status(404).json({ 
+        success: false,
+        message: 'User not found' 
+      });
+    }
+
+    // Verify current password
+    const isPasswordValid = await bcrypt.compare(currentPassword, user.password);
+    if (!isPasswordValid) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'Current password is incorrect' 
+      });
+    }
+
+    // Hash and save new password
+    const saltRounds = 10;
+    const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
+    user.password = hashedPassword;
+    await user.save();
+
+    res.json({
+      success: true,
+      message: 'Password changed successfully'
+    });
+  } catch (error) {
+    console.error('Change password error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Server error changing password',
+      error: error.message 
+    });
+  }
+});
+
+// Get all users (admin)
 app.get('/api/users', async (req, res) => {
   try {
     const users = await User.find({}, '-password -resetPasswordToken').sort({ registeredAt: -1 });
-    res.json(users.map(user => user.profile));
+    res.json({
+      success: true,
+      data: users.map(user => user.profile)
+    });
   } catch (error) {
     console.error('Get users error:', error);
-    res.status(500).json({ message: 'Server error fetching users' });
+    res.status(500).json({ 
+      success: false,
+      message: 'Server error fetching users',
+      error: error.message 
+    });
+  }
+});
+
+app.get('/api/users/:id', async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id, '-password -resetPasswordToken');
+    
+    if (!user) {
+      return res.status(404).json({ 
+        success: false,
+        message: 'User not found' 
+      });
+    }
+
+    res.json({
+      success: true,
+      data: user.profile
+    });
+  } catch (error) {
+    console.error('Get user error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Server error fetching user',
+      error: error.message 
+    });
+  }
+});
+
+app.patch('/api/users/:id/status', async (req, res) => {
+  try {
+    const { status } = req.body;
+
+    if (!['active', 'inactive', 'suspended'].includes(status)) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'Invalid status' 
+      });
+    }
+
+    const user = await User.findByIdAndUpdate(
+      req.params.id,
+      { status },
+      { new: true }
+    ).select('-password -resetPasswordToken');
+
+    if (!user) {
+      return res.status(404).json({ 
+        success: false,
+        message: 'User not found' 
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'User status updated successfully',
+      data: user.profile
+    });
+  } catch (error) {
+    console.error('Update user status error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Server error updating user status',
+      error: error.message 
+    });
+  }
+});
+
+// Update user by ID (admin)
+app.patch('/api/users/:id', async (req, res) => {
+  try {
+    const { name, phone, location } = req.body;
+
+    const updateData = {};
+    if (name !== undefined) updateData.name = name.trim();
+    if (phone !== undefined) updateData.phone = phone.trim();
+    if (location !== undefined) updateData.location = location.trim();
+
+    const user = await User.findByIdAndUpdate(
+      req.params.id,
+      updateData,
+      { new: true, runValidators: true }
+    ).select('-password -resetPasswordToken');
+
+    if (!user) {
+      return res.status(404).json({ 
+        success: false,
+        message: 'User not found' 
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'User updated successfully',
+      data: user.profile
+    });
+  } catch (error) {
+    console.error('Update user error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Server error updating user',
+      error: error.message 
+    });
+  }
+});
+
+app.delete('/api/users/:id', async (req, res) => {
+  try {
+    const user = await User.findByIdAndDelete(req.params.id);
+
+    if (!user) {
+      return res.status(404).json({ 
+        success: false,
+        message: 'User not found' 
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'User deleted successfully',
+      data: { id: req.params.id }
+    });
+  } catch (error) {
+    console.error('Delete user error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Server error deleting user',
+      error: error.message 
+    });
   }
 });
 
@@ -370,37 +757,78 @@ app.get('/api/stats/users', async (req, res) => {
   try {
     const totalUsers = await User.countDocuments();
     const activeUsers = await User.countDocuments({ status: 'active' });
+    const verifiedUsers = await User.countDocuments({ isVerified: true });
+    
+    // Get users from last 7 days
+    const weekAgo = new Date();
+    weekAgo.setDate(weekAgo.getDate() - 7);
+    const newUsersThisWeek = await User.countDocuments({ 
+      registeredAt: { $gte: weekAgo } 
+    });
     
     res.json({
-      totalUsers,
-      activeUsers
+      success: true,
+      data: {
+        totalUsers,
+        activeUsers,
+        verifiedUsers,
+        newUsersThisWeek
+      }
     });
   } catch (error) {
     console.error('Get user stats error:', error);
-    res.status(500).json({ message: 'Server error fetching user statistics' });
+    res.status(500).json({ 
+      success: false,
+      message: 'Server error fetching user statistics',
+      error: error.message 
+    });
   }
 });
 
-// Error handling
+// Error handling middleware
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err);
-  res.status(500).json({ message: 'Something went wrong!' });
+  res.status(500).json({ 
+    success: false,
+    message: 'Something went wrong!',
+    error: err.message 
+  });
 });
 
-// 404 handler - FIXED: Removed the problematic '*' pattern
+// 404 handler
 app.use((req, res) => {
-  res.status(404).json({ message: 'Route not found' });
+  res.status(404).json({ 
+    success: false,
+    message: 'Route not found',
+    path: req.path 
+  });
 });
 
 // Start server
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  console.log('Available routes:');
+  console.log(`\n🚀 Server running on port ${PORT}`);
+  console.log('\n📡 Available routes:');
   console.log('  GET    /api/health');
+  console.log('\n👤 Auth:');
   console.log('  POST   /api/auth/register');
   console.log('  POST   /api/auth/login');
+  console.log('  GET    /api/auth/me (protected)');
+  console.log('\n🧹 Cleanup Requests:');
   console.log('  POST   /api/cleanup-requests');
   console.log('  GET    /api/cleanup-requests');
+  console.log('  GET    /api/cleanup-requests/:id');
+  console.log('  GET    /api/cleanup-requests/stats');
   console.log('  GET    /api/cleanup-requests/recent');
-  console.log('  GET    /api/cleanup-requests/stats/summary');
+  console.log('  PATCH  /api/cleanup-requests/:id/status');
+  console.log('  PATCH  /api/cleanup-requests/:id/assign');
+  console.log('  DELETE /api/cleanup-requests/:id');
+  console.log('\n👥 Users:');
+  console.log('  GET    /api/users');
+  console.log('  GET    /api/users/:id');
+  console.log('  PATCH  /api/users/:id');
+  console.log('  PATCH  /api/users/:id/status');
+  console.log('  PATCH  /api/users/profile (protected)');
+  console.log('  POST   /api/users/change-password (protected)');
+  console.log('  DELETE /api/users/:id');
+  console.log('  GET    /api/stats/users\n');
 });

@@ -10,7 +10,11 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
+      "bundleIdentifier": "com.klingo.cleanupapp",
       "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "This app needs your location to help you report cleanup issues in your area and automatically detect your current location.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "This app needs your location to help you report cleanup issues in your area.",
+        "NSLocationAlwaysUsageDescription": "This app needs your location to help you report cleanup issues in your area.",
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": true,
           "NSExceptionDomains": {
@@ -27,12 +31,17 @@
       }
     },
     "android": {
+      "package": "com.klingo.cleanupapp",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
       "usesCleartextTraffic": true,
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION"
+      ],
       "config": {
         "googleMaps": {
           "apiKey": "AIzaSyDGKi5eBLdDL1LW_BL-SPSDy80gH0lyPuk"
@@ -55,7 +64,16 @@
           "backgroundColor": "#ffffff"
         }
       ],
-      "expo-location"
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Allow KlingoApp to use your location to report cleanup issues in your area.",
+          "locationAlwaysPermission": "Allow KlingoApp to use your location to report cleanup issues in your area.",
+          "locationWhenInUsePermission": "Allow KlingoApp to use your location to report cleanup issues in your area.",
+          "isAndroidBackgroundLocationEnabled": false,
+          "isAndroidForegroundServiceEnabled": false
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

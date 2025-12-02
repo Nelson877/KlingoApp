@@ -127,38 +127,82 @@ function RequestCleanup({ onBack = () => {}, onSubmitRequest = () => {} }) {
 
       const { latitude, longitude } = location.coords;
 
-      const address = await Location.reverseGeocodeAsync({ latitude, longitude });
-      
-      if (address && address.length > 0) {
-        const addr = address[0];
-        const formattedAddress = `${addr.name || ''} ${addr.street || ''}, ${addr.city || ''}, ${addr.region || ''}`.trim();
-        
+      // Store coordinates immediately
+      const updateFormWithCoords = (addressText = '') => {
         if (formData.problemType === "other") {
           setFormData({
             ...formData,
             otherDetails: {
               ...formData.otherDetails,
-              specificLocation: formattedAddress
+              specificLocation: addressText || `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`
             },
             coordinates: { latitude, longitude }
           });
         } else {
           setFormData({ 
             ...formData, 
-            location: formattedAddress,
+            location: addressText || `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`,
             coordinates: { latitude, longitude }
           });
         }
+      };
 
+      try {
+        // Add timeout wrapper for reverse geocoding
+        const reverseGeocodeWithTimeout = async (coords, timeoutMs = 5000) => {
+          return Promise.race([
+            Location.reverseGeocodeAsync(coords),
+            new Promise((_, reject) => 
+              setTimeout(() => reject(new Error('Geocoding timeout')), timeoutMs)
+            )
+          ]);
+        };
+
+        const address = await reverseGeocodeWithTimeout({ latitude, longitude });
+        
+        if (address && address.length > 0) {
+          const addr = address[0];
+          const formattedAddress = [
+            addr.name,
+            addr.street,
+            addr.city,
+            addr.region,
+            addr.country
+          ].filter(Boolean).join(', ');
+          
+          updateFormWithCoords(formattedAddress || `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`);
+
+          Alert.alert(
+            'Location Detected!',
+            'Your current location has been added successfully.',
+            [{ text: 'OK' }]
+          );
+        } else {
+          // No address found, use coordinates
+          updateFormWithCoords();
+          Alert.alert(
+            'Location Detected!',
+            'Location coordinates have been added. Address lookup was unavailable.',
+            [{ text: 'OK' }]
+          );
+        }
+      } catch (geocodeError) {
+        // Reverse geocoding failed, but we still have coordinates
+        console.log('Reverse geocoding failed, using coordinates:', geocodeError);
+        updateFormWithCoords();
+        
         Alert.alert(
           'Location Detected!',
-          'Your current location has been added successfully.',
+          'Location coordinates have been added. Address lookup was unavailable.',
           [{ text: 'OK' }]
         );
       }
     } catch (error) {
       console.error('Error getting location:', error);
-      Alert.alert('Error', 'Could not get your current location. Please try again or use the map.');
+      Alert.alert(
+        'Error', 
+        'Could not get your current location. Please try again or enter the address manually.'
+      );
     } finally {
       setIsLoadingLocation(false);
     }
@@ -208,37 +252,62 @@ function RequestCleanup({ onBack = () => {}, onSubmitRequest = () => {} }) {
       return;
     }
 
+    const { latitude, longitude } = selectedLocation;
+
+    // Store coordinates immediately
+    const updateFormWithCoords = (addressText = '') => {
+      if (formData.problemType === "other") {
+        setFormData({
+          ...formData,
+          otherDetails: {
+            ...formData.otherDetails,
+            specificLocation: addressText || `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`
+          },
+          coordinates: selectedLocation
+        });
+      } else {
+        setFormData({ 
+          ...formData, 
+          location: addressText || `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`,
+          coordinates: selectedLocation
+        });
+      }
+    };
+
     try {
-      const address = await Location.reverseGeocodeAsync(selectedLocation);
+      // Add timeout wrapper for reverse geocoding
+      const reverseGeocodeWithTimeout = async (coords, timeoutMs = 5000) => {
+        return Promise.race([
+          Location.reverseGeocodeAsync(coords),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Geocoding timeout')), timeoutMs)
+          )
+        ]);
+      };
+
+      const address = await reverseGeocodeWithTimeout(selectedLocation);
       
       if (address && address.length > 0) {
         const addr = address[0];
-        const formattedAddress = `${addr.name || ''} ${addr.street || ''}, ${addr.city || ''}, ${addr.region || ''}`.trim();
+        const formattedAddress = [
+          addr.name,
+          addr.street,
+          addr.city,
+          addr.region,
+          addr.country
+        ].filter(Boolean).join(', ');
         
-        if (formData.problemType === "other") {
-          setFormData({
-            ...formData,
-            otherDetails: {
-              ...formData.otherDetails,
-              specificLocation: formattedAddress
-            },
-            coordinates: selectedLocation
-          });
-        } else {
-          setFormData({ 
-            ...formData, 
-            location: formattedAddress,
-            coordinates: selectedLocation
-          });
-        }
+        updateFormWithCoords(formattedAddress || `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`);
+      } else {
+        updateFormWithCoords();
       }
-
-      setShowMapModal(false);
-      Alert.alert('Success', 'Location selected successfully!');
     } catch (error) {
-      console.error('Error confirming location:', error);
-      Alert.alert('Error', 'Could not process the location. Please try again.');
+      console.log('Reverse geocoding failed, using coordinates:', error);
+      updateFormWithCoords();
     }
+
+    setShowMapModal(false);
+    Alert.alert('Success', 'Location selected successfully!');
   };
 
   const handleMapPress = (event) => {
