@@ -6,7 +6,6 @@ const getApiBaseUrl = () => {
     if (Platform.OS === 'android') {
       return 'http://10.0.2.2:5000';
     } else if (Platform.OS === 'ios') {
-      // Replace with your actual computer's IP address
       return 'http://192.168.1.100:5000'; 
     } else {
       return 'http://192.168.1.100:5000';
@@ -17,15 +16,13 @@ const getApiBaseUrl = () => {
 
 const API_BASE_URL = getApiBaseUrl();
 
-// Timeout configurations for different request types
 const TIMEOUTS = {
-  DEFAULT: 30000,      // 30 seconds
-  AUTH: 120000,         // 60 seconds for login/register
-  UPLOAD: 120000,      // 2 minutes for file uploads
-  LONG_POLL: 180000,   // 3 minutes for long operations
+  DEFAULT: 30000,
+  AUTH: 120000,
+  UPLOAD: 120000,
+  LONG_POLL: 180000,
 };
 
-// Enhanced error messages for better user experience
 const USER_FRIENDLY_MESSAGES = {
   NETWORK_ERROR: 'No internet connection. Please check your network and try again.',
   SERVER_ERROR: 'We\'re experiencing some technical difficulties. Please try again in a moment.',
@@ -36,8 +33,6 @@ const USER_FRIENDLY_MESSAGES = {
   RATE_LIMIT: 'Slow down there! Please wait a moment before trying again.',
   VALIDATION_ERROR: 'Please check your information and try again.',
   UNKNOWN_ERROR: 'Something unexpected happened. Please try again.',
-  
-  // Login specific messages
   LOGIN_INVALID_CREDENTIALS: 'Welcome back! We just need to verify your details. Please double-check your email and password.',
   LOGIN_EMAIL_NOT_FOUND: 'Welcome! We don\'t recognize that email address. Would you like to create an account instead?',
   LOGIN_WRONG_PASSWORD: 'Welcome back! That password isn\'t quite right. Please give it another try.',
@@ -45,23 +40,17 @@ const USER_FRIENDLY_MESSAGES = {
   LOGIN_ACCOUNT_DISABLED: 'Welcome! There\'s a small issue with your account. Our support team is here to help resolve this.',
   LOGIN_TOO_MANY_ATTEMPTS: 'Welcome back! You\'ve been trying hard to get in. Take a quick break and we\'ll let you try again in a few minutes.',
   LOGIN_NETWORK_ISSUE: 'Welcome! We\'re having trouble connecting right now. Please check your internet and try again.',
-  
-  // Registration specific messages
   REGISTER_EMAIL_EXISTS: 'Looks like you already have an account! Try signing in instead.',
   REGISTER_WEAK_PASSWORD: 'Let\'s make your password stronger! Try adding more characters, numbers, or symbols.',
   REGISTER_INVALID_EMAIL: 'That email doesn\'t look quite right. Mind checking it?',
   REGISTER_TERMS_NOT_ACCEPTED: 'Just need you to accept our terms and conditions to continue.',
   PASSWORD_MISMATCH: 'Passwords don\'t match. Please make sure both passwords are the same.',
-  
-  // Success messages
   LOGIN_SUCCESS: '🎉 Welcome back! Great to see you again.',
   REGISTER_SUCCESS: '🎉 Welcome aboard! Your account is all set up.',
   LOGOUT_SUCCESS: 'You\'ve been signed out safely. See you soon!',
   REQUEST_SUBMITTED: '✅ All done! Your request has been submitted.',
   UPDATE_SUCCESS: '✅ Perfect! Your information has been updated.',
   DELETE_SUCCESS: '✅ Successfully deleted.',
-  
-  // Connection messages
   CONNECTION_RESTORED: '🌐 You\'re back online! Everything should work normally now.',
   CONNECTION_LOST: '📱 Connection seems spotty. Some features might not work properly.',
 };
@@ -124,7 +113,7 @@ class ApiService {
   }
 
   createDetailedError(status, data) {
-    const error = new Error();
+    const error = new Error(data?.message || `HTTP Error ${status}`);
     error.status = status;
     error.data = data;
     
@@ -232,17 +221,14 @@ class ApiService {
   }
 
   getTimeoutForEndpoint(endpoint, method) {
-    // Auth endpoints get longer timeout
     if (endpoint.includes('/auth/login') || endpoint.includes('/auth/register')) {
       return TIMEOUTS.AUTH;
     }
     
-    // Upload endpoints get even longer timeout
     if (method === 'POST' && endpoint.includes('/upload')) {
       return TIMEOUTS.UPLOAD;
     }
     
-    // Default timeout
     return TIMEOUTS.DEFAULT;
   }
 
@@ -251,7 +237,6 @@ class ApiService {
     const timeout = this.getTimeoutForEndpoint(endpoint, options.method);
     const controller = new AbortController();
     
-    // Store controller for potential cleanup
     this.activeControllers.set(requestId, controller);
     
     const timeoutId = setTimeout(() => {
@@ -275,7 +260,6 @@ class ApiService {
       this.requestQueue.set(endpoint, requestPromise);
     }
       
-    // Always clean up after request completes
     requestPromise.finally(() => {
       this.requestQueue.delete(endpoint);
       this.activeControllers.delete(requestId);
@@ -316,9 +300,8 @@ class ApiService {
       return await this.handleResponse(response);
       
     } catch (error) {
-      console.error(`API Request Error (attempt ${retryCount + 1}/${maxRetries + 1}):`, error.message);
+      console.error(`API Request Error (attempt ${retryCount + 1}/${maxRetries + 1}):`, error?.message || error);
       
-      // Handle abort/timeout
       if (error.name === 'AbortError') {
         const timeoutError = new Error('Request timeout');
         timeoutError.name = 'TimeoutError';
@@ -331,24 +314,20 @@ class ApiService {
         throw timeoutError;
       }
       
-      // Handle network errors with retry
       if (this._isNetworkError(error)) {
         this.isOnline = false;
         
-        // Retry logic
         if (retryCount < maxRetries && this._shouldRetry(error, options.method)) {
           const backoffDelay = Math.min(1000 * Math.pow(2, retryCount), 10000);
           console.log(`Retrying request in ${backoffDelay}ms... (attempt ${retryCount + 1}/${maxRetries})`);
           await new Promise(resolve => setTimeout(resolve, backoffDelay));
           
-          // Create new controller for retry
           const newController = new AbortController();
           this.activeControllers.set(requestId, newController);
           
           return this._makeRequest(endpoint, options, newController, requestId, retryCount + 1);
         }
         
-        // Max retries reached
         const networkError = new Error('Network error');
         networkError.name = 'NetworkError';
         networkError.userMessage = USER_FRIENDLY_MESSAGES.LOGIN_NETWORK_ISSUE;
@@ -361,35 +340,32 @@ class ApiService {
         throw networkError;
       }
       
-      // Pass through errors with userMessage
       if (error.userMessage) {
         throw error;
       }
       
-      // Generic error
-      const genericError = new Error(error.message || 'Unknown error');
-      genericError.name = error.name || 'UnknownError';
+      const genericError = new Error(error?.message || 'Unknown error');
+      genericError.name = error?.name || 'UnknownError';
       genericError.userMessage = USER_FRIENDLY_MESSAGES.UNKNOWN_ERROR;
       throw genericError;
     }
   }
 
   _isNetworkError(error) {
-    return error.name === 'AbortError' || 
-           error.name === 'TimeoutError' ||
-           error.message.includes('Network request failed') ||
-           error.message.includes('fetch') ||
-           error.message.includes('timeout') ||
-           error.message.includes('connection') ||
-           error.message.includes('ECONNREFUSED') ||
-           error.message.includes('ETIMEDOUT');
+    return error?.name === 'AbortError' || 
+           error?.name === 'TimeoutError' ||
+           error?.message?.includes('Network request failed') ||
+           error?.message?.includes('fetch') ||
+           error?.message?.includes('timeout') ||
+           error?.message?.includes('connection') ||
+           error?.message?.includes('ECONNREFUSED') ||
+           error?.message?.includes('ETIMEDOUT');
   }
 
   _shouldRetry(error, method) {
-    // Only retry GET requests and network errors
     const isGetRequest = !method || method === 'GET';
     const isNetworkError = this._isNetworkError(error);
-    const hasNoUserMessage = !error.userMessage;
+    const hasNoUserMessage = !error?.userMessage;
     
     return isNetworkError && hasNoUserMessage && isGetRequest;
   }
@@ -427,8 +403,6 @@ class ApiService {
     }
   }
 
-  // ===== AUTH METHODS =====
-
   async register(userData) {
     console.log('Registering new user...');
     try {
@@ -459,13 +433,12 @@ class ApiService {
     } catch (error) {
       console.error('Registration failed:', error);
       
-      // Create a new error with proper message handling
-      const registrationError = new Error(error.message || 'Registration failed');
-      registrationError.name = error.name || 'RegistrationError';
-      registrationError.status = error.status;
-      registrationError.userMessage = error.userMessage || USER_FRIENDLY_MESSAGES.UNKNOWN_ERROR;
-      registrationError.validationErrors = error.validationErrors;
-      registrationError.suggestions = error.suggestions || ['Check your connection', 'Make sure the server is running', 'Try again'];
+      const registrationError = new Error(error?.message || 'Registration failed');
+      registrationError.name = error?.name || 'RegistrationError';
+      registrationError.status = error?.status;
+      registrationError.userMessage = error?.userMessage || USER_FRIENDLY_MESSAGES.UNKNOWN_ERROR;
+      registrationError.validationErrors = error?.validationErrors;
+      registrationError.suggestions = error?.suggestions || ['Check your connection', 'Make sure the server is running', 'Try again'];
       
       throw registrationError;
     }
@@ -501,11 +474,11 @@ class ApiService {
     } catch (error) {
       console.error('Login failed:', error);
       
-      const loginError = new Error(error.message || 'Login failed');
-      loginError.name = error.name || 'LoginError';
-      loginError.status = error.status;
-      loginError.userMessage = error.userMessage || USER_FRIENDLY_MESSAGES.LOGIN_INVALID_CREDENTIALS;
-      loginError.suggestions = error.suggestions || ['Check your email and password', 'Make sure you have an account'];
+      const loginError = new Error(error?.message || 'Login failed');
+      loginError.name = error?.name || 'LoginError';
+      loginError.status = error?.status;
+      loginError.userMessage = error?.userMessage || USER_FRIENDLY_MESSAGES.LOGIN_INVALID_CREDENTIALS;
+      loginError.suggestions = error?.suggestions || ['Check your email and password', 'Make sure you have an account'];
       
       throw loginError;
     }
@@ -531,8 +504,6 @@ class ApiService {
       throw logoutError;
     }
   }
-
-  // ===== VALIDATION METHODS =====
 
   validateLoginCredentials(credentials) {
     if (!credentials.email || !credentials.email.trim()) {
@@ -672,8 +643,6 @@ class ApiService {
     return null;
   }
 
-  // ===== USER PROFILE METHODS =====
-
   async getCurrentUser() {
     console.log('Fetching current user profile...');
     try {
@@ -682,8 +651,8 @@ class ApiService {
       return result;
     } catch (error) {
       console.error('Failed to fetch current user:', error);
-      const fetchError = new Error(error.message);
-      fetchError.userMessage = error.userMessage || 'Failed to load your profile. Please try again.';
+      const fetchError = new Error(error?.message || 'Failed to fetch user');
+      fetchError.userMessage = error?.userMessage || 'Failed to load your profile. Please try again.';
       throw fetchError;
     }
   }
@@ -698,7 +667,6 @@ class ApiService {
       
       console.log('User profile updated successfully');
       
-      // Update stored user data if it's the current user
       const storedUser = await this.getStoredUserData();
       if (storedUser && storedUser.id === userId) {
         const updatedUser = { ...storedUser, ...userData };
@@ -709,8 +677,8 @@ class ApiService {
       return result;
     } catch (error) {
       console.error('Failed to update user profile:', error);
-      const updateError = new Error(error.message);
-      updateError.userMessage = error.userMessage || 'Failed to update your profile. Please try again.';
+      const updateError = new Error(error?.message || 'Update failed');
+      updateError.userMessage = error?.userMessage || 'Failed to update your profile. Please try again.';
       throw updateError;
     }
   }
@@ -725,7 +693,6 @@ class ApiService {
       
       console.log('Profile updated successfully');
       
-      // Update stored user data
       if (result.user || result.data) {
         const updatedUser = result.user || result.data;
         await AsyncStorage.setItem('userData', JSON.stringify(updatedUser));
@@ -735,8 +702,8 @@ class ApiService {
       return result;
     } catch (error) {
       console.error('Failed to update profile:', error);
-      const updateError = new Error(error.message);
-      updateError.userMessage = error.userMessage || 'Failed to update your profile. Please try again.';
+      const updateError = new Error(error?.message || 'Update failed');
+      updateError.userMessage = error?.userMessage || 'Failed to update your profile. Please try again.';
       throw updateError;
     }
   }
@@ -760,13 +727,11 @@ class ApiService {
       return result;
     } catch (error) {
       console.error('Failed to change password:', error);
-      const changeError = new Error(error.message);
-      changeError.userMessage = error.userMessage || 'Failed to change password. Please try again.';
+      const changeError = new Error(error?.message || 'Password change failed');
+      changeError.userMessage = error?.userMessage || 'Failed to change password. Please try again.';
       throw changeError;
     }
   }
-
-  // ===== CLEANUP REQUEST METHODS =====
 
   async submitCleanupRequest(requestData) {
     console.log('Submitting cleanup request:', requestData);
@@ -790,9 +755,9 @@ class ApiService {
       result.userMessage = USER_FRIENDLY_MESSAGES.REQUEST_SUBMITTED;
       return result;
     } catch (error) {
-      console.error('Submit cleanup request failed:', error.message);
-      const submitError = new Error(error.message);
-      submitError.userMessage = error.userMessage || 'Failed to submit your request. Please try again.';
+      console.error('Submit cleanup request failed:', error?.message || error);
+      const submitError = new Error(error?.message || 'Submission failed');
+      submitError.userMessage = error?.userMessage || 'Failed to submit your request. Please try again.';
       throw submitError;
     }
   }
@@ -815,9 +780,9 @@ class ApiService {
       console.log(`Cleanup requests fetched successfully: ${result.data?.length || 0} items`);
       return result;
     } catch (error) {
-      console.error('Failed to fetch cleanup requests:', error.message);
-      const fetchError = new Error(error.message);
-      fetchError.userMessage = error.userMessage || 'Failed to load cleanup requests. Please try again.';
+      console.error('Failed to fetch cleanup requests:', error?.message || error);
+      const fetchError = new Error(error?.message || 'Fetch failed');
+      fetchError.userMessage = error?.userMessage || 'Failed to load cleanup requests. Please try again.';
       throw fetchError;
     }
   }
@@ -829,9 +794,9 @@ class ApiService {
       console.log('Cleanup request fetched successfully');
       return result;
     } catch (error) {
-      console.error('Failed to fetch cleanup request:', error.message);
-      const fetchError = new Error(error.message);
-      fetchError.userMessage = error.userMessage || 'Failed to load cleanup request details. Please try again.';
+      console.error('Failed to fetch cleanup request:', error?.message || error);
+      const fetchError = new Error(error?.message || 'Fetch failed');
+      fetchError.userMessage = error?.userMessage || 'Failed to load cleanup request details. Please try again.';
       throw fetchError;
     }
   }
@@ -848,9 +813,9 @@ class ApiService {
       result.userMessage = USER_FRIENDLY_MESSAGES.UPDATE_SUCCESS;
       return result;
     } catch (error) {
-      console.error('Failed to update cleanup request status:', error.message);
-      const updateError = new Error(error.message);
-      updateError.userMessage = error.userMessage || 'Failed to update status. Please try again.';
+      console.error('Failed to update cleanup request status:', error?.message || error);
+      const updateError = new Error(error?.message || 'Update failed');
+      updateError.userMessage = error?.userMessage || 'Failed to update status. Please try again.';
       throw updateError;
     }
   }
@@ -867,9 +832,9 @@ class ApiService {
       result.userMessage = USER_FRIENDLY_MESSAGES.UPDATE_SUCCESS;
       return result;
     } catch (error) {
-      console.error('Failed to assign cleanup request:', error.message);
-      const assignError = new Error(error.message);
-      assignError.userMessage = error.userMessage || 'Failed to assign request. Please try again.';
+      console.error('Failed to assign cleanup request:', error?.message || error);
+      const assignError = new Error(error?.message || 'Assignment failed');
+      assignError.userMessage = error?.userMessage || 'Failed to assign request. Please try again.';
       throw assignError;
     }
   }
@@ -885,9 +850,9 @@ class ApiService {
       result.userMessage = USER_FRIENDLY_MESSAGES.DELETE_SUCCESS;
       return result;
     } catch (error) {
-      console.error('Failed to delete cleanup request:', error.message);
-      const deleteError = new Error(error.message);
-      deleteError.userMessage = error.userMessage || 'Failed to delete request. Please try again.';
+      console.error('Failed to delete cleanup request:', error?.message || error);
+      const deleteError = new Error(error?.message || 'Delete failed');
+      deleteError.userMessage = error?.userMessage || 'Failed to delete request. Please try again.';
       throw deleteError;
     }
   }
@@ -899,14 +864,143 @@ class ApiService {
       console.log('Cleanup statistics fetched successfully');
       return result;
     } catch (error) {
-      console.error('Failed to fetch cleanup statistics:', error.message);
-      const statsError = new Error(error.message);
-      statsError.userMessage = error.userMessage || 'Failed to load statistics. Please try again.';
+      console.error('Failed to fetch cleanup statistics:', error?.message || error);
+      const statsError = new Error(error?.message || 'Stats fetch failed');
+      statsError.userMessage = error?.userMessage || 'Failed to load statistics. Please try again.';
       throw statsError;
     }
   }
 
-  // ===== UTILITY METHODS =====
+  async getMyCleanupRequests(filters = {}) {
+    console.log('Fetching my cleanup requests with filters:', filters);
+    try {
+      const queryParams = new URLSearchParams();
+      queryParams.append('userId', 'me');
+      
+      Object.keys(filters).forEach(key => {
+        if (filters[key] !== undefined && filters[key] !== null && filters[key] !== '') {
+          queryParams.append(key, filters[key]);
+        }
+      });
+
+      const queryString = queryParams.toString();
+      const endpoint = `/api/cleanup-requests/my-requests?${queryString}`;
+      
+      const result = await this.request(endpoint);
+      console.log(`My cleanup requests fetched successfully: ${result.data?.length || 0} items`);
+      return result;
+    } catch (error) {
+      console.error('Failed to fetch my cleanup requests:', error?.message || error);
+      const fetchError = new Error(error?.message || 'Fetch failed');
+      fetchError.userMessage = error?.userMessage || 'Failed to load your cleanup requests. Please try again.';
+      throw fetchError;
+    }
+  }
+
+  async getCleanupRequestDetails(requestId) {
+    console.log('Fetching detailed cleanup request:', requestId);
+    try {
+      const result = await this.request(`/api/cleanup-requests/${requestId}/details`);
+      console.log('Cleanup request details fetched successfully');
+      return result;
+    } catch (error) {
+      console.error('Failed to fetch cleanup request details:', error?.message || error);
+      const fetchError = new Error(error?.message || 'Fetch failed');
+      fetchError.userMessage = error?.userMessage || 'Failed to load request details. Please try again.';
+      throw fetchError;
+    }
+  }
+
+  async getCleanupRequestUpdates(requestId) {
+    console.log('Fetching cleanup request updates:', requestId);
+    try {
+      const result = await this.request(`/api/cleanup-requests/${requestId}/updates`);
+      console.log('Cleanup request updates fetched successfully');
+      return result;
+    } catch (error) {
+      console.error('Failed to fetch cleanup request updates:', error?.message || error);
+      const fetchError = new Error(error?.message || 'Fetch failed');
+      fetchError.userMessage = error?.userMessage || 'Failed to load request updates. Please try again.';
+      throw fetchError;
+    }
+  }
+
+  async contactSupportAboutRequest(requestId, message, contactMethod = 'email') {
+    console.log('Contacting support about request:', requestId);
+    try {
+      const result = await this.request(`/api/cleanup-requests/${requestId}/contact-support`, {
+        method: 'POST',
+        body: JSON.stringify({ message, contactMethod }),
+      });
+      
+      console.log('Support contact request sent successfully');
+      result.userMessage = '✅ Your message has been sent to our support team. We\'ll get back to you soon!';
+      return result;
+    } catch (error) {
+      console.error('Failed to contact support:', error?.message || error);
+      const contactError = new Error(error?.message || 'Contact failed');
+      contactError.userMessage = error?.userMessage || 'Failed to send message to support. Please try again.';
+      throw contactError;
+    }
+  }
+
+  async cancelCleanupRequest(requestId, reason = '') {
+    console.log('Cancelling cleanup request:', requestId);
+    try {
+      const result = await this.request(`/api/cleanup-requests/${requestId}/cancel`, {
+        method: 'POST',
+        body: JSON.stringify({ reason }),
+      });
+      
+      console.log('Cleanup request cancelled successfully');
+      result.userMessage = '✅ Your cleanup request has been cancelled.';
+      return result;
+    } catch (error) {
+      console.error('Failed to cancel cleanup request:', error?.message || error);
+      const cancelError = new Error(error?.message || 'Cancel failed');
+      cancelError.userMessage = error?.userMessage || 'Failed to cancel request. Please try again.';
+      throw cancelError;
+    }
+  }
+
+  async rateCleanupRequest(requestId, rating, review = '') {
+    console.log('Rating cleanup request:', requestId, 'with rating:', rating);
+    try {
+      if (rating < 1 || rating > 5) {
+        const error = new Error('Invalid rating');
+        error.userMessage = 'Please provide a rating between 1 and 5 stars.';
+        throw error;
+      }
+
+      const result = await this.request(`/api/cleanup-requests/${requestId}/rate`, {
+        method: 'POST',
+        body: JSON.stringify({ rating, review }),
+      });
+      
+      console.log('Cleanup request rated successfully');
+      result.userMessage = '✅ Thank you for your feedback!';
+      return result;
+    } catch (error) {
+      console.error('Failed to rate cleanup request:', error?.message || error);
+      const rateError = new Error(error?.message || 'Rating failed');
+      rateError.userMessage = error?.userMessage || 'Failed to submit rating. Please try again.';
+      throw rateError;
+    }
+  }
+
+  async getMyCleanupStats() {
+    console.log('Fetching my cleanup statistics');
+    try {
+      const result = await this.request('/api/cleanup-requests/my-stats');
+      console.log('My cleanup statistics fetched successfully');
+      return result;
+    } catch (error) {
+      console.error('Failed to fetch my cleanup statistics:', error?.message || error);
+      const statsError = new Error(error?.message || 'Stats fetch failed');
+      statsError.userMessage = error?.userMessage || 'Failed to load your statistics. Please try again.';
+      throw statsError;
+    }
+  }
 
   async clearStorage() {
     console.log('Clearing local storage...');
@@ -940,29 +1034,29 @@ class ApiService {
   }
 
   getDisplayMessage(error) {
-    return error.userMessage || error.message || USER_FRIENDLY_MESSAGES.UNKNOWN_ERROR;
+    return error?.userMessage || error?.message || USER_FRIENDLY_MESSAGES.UNKNOWN_ERROR;
   }
 
   getErrorSuggestions(error) {
-    return error.suggestions || [];
+    return error?.suggestions || [];
   }
 
   isRecoverableError(error) {
     const recoverableStatuses = [400, 401, 422, 429];
-    return recoverableStatuses.includes(error.status) || this._isNetworkError(error);
+    return recoverableStatuses.includes(error?.status) || this._isNetworkError(error);
   }
 
   getRecoveryActions(error) {
     const actions = [];
     
-    if (error.status === 401) {
+    if (error?.status === 401) {
       actions.push({ label: 'Try Again', action: 'retry' });
       actions.push({ label: 'Forgot Password?', action: 'forgot_password' });
       actions.push({ label: 'Create Account', action: 'register' });
     } else if (this._isNetworkError(error)) {
       actions.push({ label: 'Check Connection', action: 'check_network' });
       actions.push({ label: 'Try Again', action: 'retry' });
-    } else if (error.status === 429) {
+    } else if (error?.status === 429) {
       actions.push({ label: 'Wait & Retry', action: 'wait_retry' });
     } else {
       actions.push({ label: 'Try Again', action: 'retry' });
@@ -1002,7 +1096,6 @@ class ApiService {
     return formatted;
   }
 
-  // Cancel all pending requests (useful for cleanup on unmount)
   cancelAllRequests() {
     console.log(`Cancelling ${this.activeControllers.size} active requests`);
     this.activeControllers.forEach((controller, requestId) => {

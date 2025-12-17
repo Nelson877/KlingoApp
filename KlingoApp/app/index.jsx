@@ -8,6 +8,7 @@ import Login from "./login";
 import SignUp from "./signup";
 import ForgotPassword from "./forgot-password";
 import RequestCleanup from "./request-cleanup";
+import CleanupProgress from "./cleanup-progress";
 import HomeScreen from "./(tabs)/home";
 import ProfileScreen from "./(tabs)/profile";
 import SettingsScreen from "./(tabs)/settings";
@@ -167,8 +168,8 @@ export default function Index() {
       // Simulate API call
       await new Promise((resolve) => setTimeout(resolve, 2000));
 
-      // Navigate back to home after successful submission
-      setCurrentScreen("home");
+      // Navigate to progress screen after successful submission
+      setCurrentScreen("cleanupProgress");
     } catch (error) {
       console.error("Failed to submit cleanup request:", error);
     } finally {
@@ -183,6 +184,11 @@ export default function Index() {
 
   const handleNavigateToSettings = () => {
     setCurrentScreen("settings");
+  };
+
+  // NEW: Handler to navigate to cleanup progress screen
+  const handleNavigateToProgress = () => {
+    setCurrentScreen("cleanupProgress");
   };
 
   // Show loading screen when loading
@@ -249,6 +255,15 @@ export default function Index() {
     );
   }
 
+  // NEW: Render cleanup progress screen
+  if (currentScreen === "cleanupProgress") {
+    return (
+      <CleanupProgress
+        onBack={handleBackToHome}
+      />
+    );
+  }
+
   // Render settings screen
   if (currentScreen === "settings") {
     return (
@@ -278,6 +293,7 @@ export default function Index() {
       <HomeScreen
         user={currentUser}
         onRequestCleanup={handleRequestCleanup}
+        onNavigateToProgress={handleNavigateToProgress}
         onLogout={handleLogout}
         onNavigateToProfile={handleNavigateToProfile}
         onNavigateToSettings={handleNavigateToSettings}
@@ -288,4 +304,3 @@ export default function Index() {
   // Fallback (shouldn't reach here)
   return null;
 }
-// export default RootLayout;
