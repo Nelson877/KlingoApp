@@ -19,11 +19,20 @@ app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Request logging
+// Request logging (sanitized - never log passwords)
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+  
+  // Only log request body for non-sensitive routes
   if (req.body && Object.keys(req.body).length > 0) {
-    console.log('Request body:', JSON.stringify(req.body, null, 2));
+    // Create a safe copy of the body without sensitive fields
+    const safeBody = { ...req.body };
+    if (safeBody.password) safeBody.password = '[HIDDEN]';
+    if (safeBody.currentPassword) safeBody.currentPassword = '[HIDDEN]';
+    if (safeBody.newPassword) safeBody.newPassword = '[HIDDEN]';
+    if (safeBody.confirmPassword) safeBody.confirmPassword = '[HIDDEN]';
+    
+    console.log('Request body:', JSON.stringify(safeBody, null, 2));
   }
   next();
 });
@@ -199,7 +208,33 @@ app.get('/api/cleanup-requests/recent', async (req, res) => {
   }
 });
 
-// Submit new cleanup request
+// NEW: Get user's own cleanup requests (authenticated)
+app.get('/api/cleanup-requests/my-requests', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    
+    console.log(`Fetching cleanup requests for user: ${userId}`);
+    
+    const requests = await CleanupRequest.find({ submittedBy: userId })
+      .sort({ createdAt: -1 });
+
+    console.log(`Found ${requests.length} requests for user ${userId}`);
+
+    res.json({
+      success: true,
+      data: requests
+    });
+  } catch (error) {
+    console.error('Get my requests error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Server error fetching your requests',
+      error: error.message 
+    });
+  }
+});
+
+// UPDATED: Submit new cleanup request (now stores user ID if authenticated)
 app.post('/api/cleanup-requests', async (req, res) => {
   try {
     console.log('Received cleanup request submission:', req.body);
@@ -215,6 +250,23 @@ app.post('/api/cleanup-requests', async (req, res) => {
       coordinates,
       deviceInfo
     } = req.body;
+
+    // Check if user is authenticated (optional - allows anonymous submissions)
+    let submittedBy = null;
+    const authHeader = req.headers['authorization'];
+    if (authHeader) {
+      const token = authHeader.split(' ')[1];
+      try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        submittedBy = decoded.userId;
+        console.log(`Request submitted by authenticated user: ${submittedBy}`);
+      } catch (err) {
+        // Token invalid or expired, continue without user association
+        console.log('Request submitted without authentication or with invalid token');
+      }
+    } else {
+      console.log('Request submitted anonymously (no auth header)');
+    }
 
     // Validation with detailed error messages
     const validationErrors = [];
@@ -249,8 +301,9 @@ app.post('/api/cleanup-requests', async (req, res) => {
       });
     }
 
-    // Create cleanup request
+    // Create cleanup request with user association
     const cleanupRequest = new CleanupRequest({
+      submittedBy, // Add the user ID (will be null for anonymous submissions)
       problemType,
       location: requestLocation.trim(),
       severity,
@@ -479,6 +532,40 @@ app.delete('/api/cleanup-requests/:id', async (req, res) => {
     res.status(500).json({ 
       success: false,
       message: 'Server error deleting request',
+      error: error.message 
+    });
+  }
+});
+
+// NEW: Contact support about a request
+app.post('/api/cleanup-requests/:id/contact-support', authenticateToken, async (req, res) => {
+  try {
+    const { message, contactMethod } = req.body;
+    const requestId = req.params.id;
+    
+    // Verify the request exists
+    const request = await CleanupRequest.findById(requestId);
+    if (!request) {
+      return res.status(404).json({ 
+        success: false,
+        message: 'Cleanup request not found' 
+      });
+    }
+
+    // Here you would typically send an email or create a support ticket
+    console.log(`Support contact for request ${requestId}:`, { message, contactMethod });
+    
+    // TODO: Implement actual email/notification logic here
+    
+    res.json({
+      success: true,
+      message: 'Support has been notified about your request'
+    });
+  } catch (error) {
+    console.error('Contact support error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Server error contacting support',
       error: error.message 
     });
   }
@@ -807,28 +894,5 @@ app.use((req, res) => {
 // Start server
 app.listen(PORT, () => {
   console.log(`\n🚀 Server running on port ${PORT}`);
-  console.log('\n📡 Available routes:');
-  console.log('  GET    /api/health');
-  console.log('\n👤 Auth:');
-  console.log('  POST   /api/auth/register');
-  console.log('  POST   /api/auth/login');
-  console.log('  GET    /api/auth/me (protected)');
-  console.log('\n🧹 Cleanup Requests:');
-  console.log('  POST   /api/cleanup-requests');
-  console.log('  GET    /api/cleanup-requests');
-  console.log('  GET    /api/cleanup-requests/:id');
-  console.log('  GET    /api/cleanup-requests/stats');
-  console.log('  GET    /api/cleanup-requests/recent');
-  console.log('  PATCH  /api/cleanup-requests/:id/status');
-  console.log('  PATCH  /api/cleanup-requests/:id/assign');
-  console.log('  DELETE /api/cleanup-requests/:id');
-  console.log('\n👥 Users:');
-  console.log('  GET    /api/users');
-  console.log('  GET    /api/users/:id');
-  console.log('  PATCH  /api/users/:id');
-  console.log('  PATCH  /api/users/:id/status');
-  console.log('  PATCH  /api/users/profile (protected)');
-  console.log('  POST   /api/users/change-password (protected)');
-  console.log('  DELETE /api/users/:id');
-  console.log('  GET    /api/stats/users\n');
+  console.log('📡 API Ready - MongoDB Connected\n');
 });

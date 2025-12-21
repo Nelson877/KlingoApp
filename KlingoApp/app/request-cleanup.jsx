@@ -397,78 +397,85 @@ function RequestCleanup({ onBack = () => {}, onSubmitRequest = () => {} }) {
     }
   };
 
-  const handleSubmit = async () => {
-    setIsSubmitting(true);
+const handleSubmit = async () => {
+  setIsSubmitting(true);
 
-    try {
-      const submissionData = {
-        problemType: formData.problemType,
-        location: formData.problemType === "other" 
-          ? formData.otherDetails.specificLocation 
-          : formData.location,
-        severity: formData.severity,
-        description: formData.description,
-        contactInfo: {
-          name: formData.contactInfo.name || 'Anonymous',
-          phone: formData.contactInfo.phone,
-          email: formData.contactInfo.email || ''
+  try {
+    const submissionData = {
+      problemType: formData.problemType,
+      location: formData.problemType === "other" 
+        ? formData.otherDetails.specificLocation 
+        : formData.location,
+      severity: formData.severity,
+      description: formData.description,
+      contactInfo: {
+        name: formData.contactInfo.name || 'Anonymous',
+        phone: formData.contactInfo.phone,
+        email: formData.contactInfo.email || ''
+      },
+      photos: formData.photos || [],
+      otherDetails: formData.problemType === "other" ? formData.otherDetails : {},
+      coordinates: formData.coordinates || {},
+      deviceInfo: Platform.OS + ' ' + Platform.Version
+    };
+
+    console.log('Submitting data:', submissionData);
+
+    const result = await ApiService.submitCleanupRequest(submissionData);
+
+    Alert.alert(
+      "Request Submitted Successfully!",
+      "Thank you for helping keep our community clean. We'll review your request and take appropriate action.",
+      [{ 
+        text: "OK", 
+        onPress: () => {
+          onSubmitRequest(submissionData);
+          setCurrentStep(1);
+          setFormData({
+            photos: [],
+            location: "",
+            problemType: "",
+            severity: "",
+            description: "",
+            contactInfo: { phone: "", name: "", email: "" },
+            otherDetails: {
+              customProblemType: "",
+              preferredDate: "",
+              preferredTime: "",
+              specificLocation: "",
+            },
+            coordinates: null,
+          });
+        }
+      }]
+    );
+  } catch (error) {
+    console.error('Submission error:', error);
+    
+    // Safely get error message with multiple fallbacks
+    const errorMessage = error?.userMessage || 
+                        error?.message || 
+                        (typeof error === 'string' ? error : '') ||
+                        "There was an error submitting your request. Please check your internet connection and try again.";
+    
+    Alert.alert(
+      "Submission Failed",
+      errorMessage,
+      [
+        { 
+          text: "Retry", 
+          onPress: () => handleSubmit()
         },
-        photos: formData.photos || [],
-        otherDetails: formData.problemType === "other" ? formData.otherDetails : {},
-        coordinates: formData.coordinates || {},
-        deviceInfo: Platform.OS + ' ' + Platform.Version
-      };
-
-      console.log('Submitting data:', submissionData);
-
-      const result = await ApiService.submitCleanupRequest(submissionData);
-
-      Alert.alert(
-        "Request Submitted Successfully!",
-        "Thank you for helping keep our community clean. We'll review your request and take appropriate action.",
-        [{ 
-          text: "OK", 
-          onPress: () => {
-            onSubmitRequest(submissionData);
-            setCurrentStep(1);
-            setFormData({
-              photos: [],
-              location: "",
-              problemType: "",
-              severity: "",
-              description: "",
-              contactInfo: { phone: "", name: "", email: "" },
-              otherDetails: {
-                customProblemType: "",
-                preferredDate: "",
-                preferredTime: "",
-                specificLocation: "",
-              },
-              coordinates: null,
-            });
-          }
-        }]
-      );
-    } catch (error) {
-      console.error('Submission error:', error);
-      Alert.alert(
-        "Submission Failed",
-        error.userMessage || "There was an error submitting your request. Please check your internet connection and try again.",
-        [
-          { 
-            text: "Retry", 
-            onPress: () => handleSubmit()
-          },
-          { 
-            text: "Cancel", 
-            style: "cancel"
-          }
-        ]
-      );
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
+        { 
+          text: "Cancel", 
+          style: "cancel"
+        }
+      ]
+    );
+  } finally {
+    setIsSubmitting(false);
+  }
+};
 
   const takePicture = () => {
     Alert.alert("Camera", "Camera functionality would open here");

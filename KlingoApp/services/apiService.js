@@ -588,9 +588,8 @@ class ApiService {
       errors.push('Description must be at least 10 characters long.');
     }
 
-    if (!requestData.contactInfo?.phone || !requestData.contactInfo.phone.trim()) {
-      errors.push('Please provide your phone number.');
-    } else {
+    // Make phone optional or less strict
+    if (requestData.contactInfo?.phone) {
       const phoneError = this.validatePhoneNumber(requestData.contactInfo.phone);
       if (phoneError) {
         errors.push(phoneError);
@@ -616,6 +615,7 @@ class ApiService {
       }
     }
 
+    console.log('Validation errors:', errors);
     return errors;
   }
 
@@ -735,16 +735,26 @@ class ApiService {
 
   async submitCleanupRequest(requestData) {
     console.log('Submitting cleanup request:', requestData);
+    console.log('Request data structure:', {
+      problemType: requestData.problemType,
+      severity: requestData.severity,
+      description: requestData.description?.substring(0, 50),
+      location: requestData.location,
+      contactInfo: requestData.contactInfo,
+      otherDetails: requestData.otherDetails
+    });
     
     try {
       const validationErrors = this.validateCleanupRequest(requestData);
       if (validationErrors.length > 0) {
+        console.error('Validation failed with errors:', validationErrors);
         const error = new Error('Validation failed');
         error.userMessage = validationErrors.join(' ');
         throw error;
       }
 
       const formattedData = this.formatCleanupRequestData(requestData);
+      console.log('Formatted data for API:', formattedData);
 
       const result = await this.request('/api/cleanup-requests', {
         method: 'POST',
@@ -755,8 +765,9 @@ class ApiService {
       result.userMessage = USER_FRIENDLY_MESSAGES.REQUEST_SUBMITTED;
       return result;
     } catch (error) {
-      console.error('Submit cleanup request failed:', error?.message || error);
-      const submitError = new Error(error?.message || 'Submission failed');
+      console.error('Submit cleanup request failed:', error?.message || String(error));
+      const errorMessage = error?.message || error?.toString?.() || 'Submission failed';
+      const submitError = new Error(errorMessage);
       submitError.userMessage = error?.userMessage || 'Failed to submit your request. Please try again.';
       throw submitError;
     }

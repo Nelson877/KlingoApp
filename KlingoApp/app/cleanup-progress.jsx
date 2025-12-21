@@ -11,11 +11,12 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import ApiService from '../services/apiService';
 
-function CleanupProgress({ onBack = () => {} }) {
+function CleanupProgress({ onBack = () => {}, user = null, initialFilter = null }) {  
   const [requests, setRequests] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedRequest, setSelectedRequest] = useState(null);
+  const [statusFilter, setStatusFilter] = useState(initialFilter); // NEW: Filter state
 
   const statusSteps = [
     {
@@ -57,118 +58,31 @@ function CleanupProgress({ onBack = () => {} }) {
 
   useEffect(() => {
     fetchRequests();
-  }, []);
+  }, [statusFilter]); // Refetch when filter changes
 
   const fetchRequests = async () => {
     try {
       setIsLoading(true);
-      // Replace with actual API call
-      const response = await ApiService.getCleanupRequests();
-      setRequests(response.data || []);
+      
+      const response = await ApiService.getMyCleanupRequests();
+      let fetchedRequests = response.data || [];
+      
+      // Apply status filter if set
+      if (statusFilter) {
+        fetchedRequests = fetchedRequests.filter(req => req.status === statusFilter);
+      }
+      
+      setRequests(fetchedRequests);
     } catch (error) {
       console.error('Error fetching requests:', error);
-      // Mock data for demonstration
-      setRequests([
-        {
-          id: "REQ001",
-          problemType: "litter",
-          location: "Main Street, Downtown",
-          severity: "high",
-          status: "in_progress",
-          submittedAt: "2024-12-10T10:30:00Z",
-          estimatedCompletion: "2024-12-16T15:00:00Z",
-          description: "Large amount of trash near the park entrance",
-          assignedTeam: "Cleanup Crew A",
-          updates: [
-            {
-              status: "submitted",
-              timestamp: "2024-12-10T10:30:00Z",
-              message: "Request received and logged"
-            },
-            {
-              status: "reviewing",
-              timestamp: "2024-12-10T14:20:00Z",
-              message: "Request reviewed and approved"
-            },
-            {
-              status: "scheduled",
-              timestamp: "2024-12-11T09:00:00Z",
-              message: "Cleanup scheduled for Dec 16"
-            },
-            {
-              status: "in_progress",
-              timestamp: "2024-12-15T08:30:00Z",
-              message: "Team is on-site working"
-            }
-          ]
-        },
-        {
-          id: "REQ002",
-          problemType: "graffiti",
-          location: "City Hall Building",
-          severity: "medium",
-          status: "scheduled",
-          submittedAt: "2024-12-12T14:15:00Z",
-          estimatedCompletion: "2024-12-18T12:00:00Z",
-          description: "Graffiti on the west wall",
-          assignedTeam: "Maintenance Team B",
-          updates: [
-            {
-              status: "submitted",
-              timestamp: "2024-12-12T14:15:00Z",
-              message: "Request received"
-            },
-            {
-              status: "reviewing",
-              timestamp: "2024-12-12T16:45:00Z",
-              message: "Under evaluation"
-            },
-            {
-              status: "scheduled",
-              timestamp: "2024-12-13T10:00:00Z",
-              message: "Scheduled for Dec 18"
-            }
-          ]
-        },
-        {
-          id: "REQ003",
-          problemType: "overgrown",
-          location: "Central Park, East Entrance",
-          severity: "low",
-          status: "completed",
-          submittedAt: "2024-12-05T09:00:00Z",
-          completedAt: "2024-12-12T16:30:00Z",
-          description: "Overgrown bushes blocking pathway",
-          assignedTeam: "Landscaping Team",
-          updates: [
-            {
-              status: "submitted",
-              timestamp: "2024-12-05T09:00:00Z",
-              message: "Request submitted"
-            },
-            {
-              status: "reviewing",
-              timestamp: "2024-12-05T11:30:00Z",
-              message: "Request approved"
-            },
-            {
-              status: "scheduled",
-              timestamp: "2024-12-06T08:00:00Z",
-              message: "Work scheduled"
-            },
-            {
-              status: "in_progress",
-              timestamp: "2024-12-12T09:00:00Z",
-              message: "Team started work"
-            },
-            {
-              status: "completed",
-              timestamp: "2024-12-12T16:30:00Z",
-              message: "Work completed successfully"
-            }
-          ]
-        }
-      ]);
+      
+      Alert.alert(
+        'Unable to Load Requests',
+        error?.userMessage || 'Could not load your cleanup requests. Please try again.',
+        [{ text: 'OK' }]
+      );
+      
+      setRequests([]);
     } finally {
       setIsLoading(false);
       setRefreshing(false);
@@ -243,7 +157,7 @@ function CleanupProgress({ onBack = () => {} }) {
 
     return (
       <TouchableOpacity
-        key={request.id}
+        key={request._id || request.id}
         className='bg-white rounded-2xl p-5 mb-4 shadow-sm border border-gray-100'
         onPress={() => setSelectedRequest(request)}
         activeOpacity={0.7}
@@ -252,7 +166,7 @@ function CleanupProgress({ onBack = () => {} }) {
           <View className='flex-1'>
             <View className='flex-row items-center mb-2'>
               <Text className='text-xs font-bold text-gray-500 bg-gray-100 px-3 py-1 rounded-full'>
-                {request.id}
+                {request.formattedId || request.id || 'REQ-XXX'}
               </Text>
               <View
                 className='ml-2 px-3 py-1 rounded-full'
@@ -284,15 +198,15 @@ function CleanupProgress({ onBack = () => {} }) {
             style={{ backgroundColor: `${getStatusColor(request.status)}15` }}
           >
             <Ionicons
-              name={statusSteps[currentStatusIndex]?.icon}
+              name={statusSteps[currentStatusIndex]?.icon || 'help-circle'}
               size={16}
               color={getStatusColor(request.status)}
             />
             <Text
-              className='text-sm font-semibold ml-2'
+              className='text-sm font-semibold ml-2 capitalize'
               style={{ color: getStatusColor(request.status) }}
             >
-              {statusSteps[currentStatusIndex]?.label}
+              {request.status.replace('-', ' ')}
             </Text>
           </View>
           {!isCompleted && request.estimatedCompletion && (
@@ -306,7 +220,7 @@ function CleanupProgress({ onBack = () => {} }) {
           <View className='flex-row items-center'>
             <Ionicons name='time-outline' size={14} color='#9CA3AF' />
             <Text className='text-xs text-gray-500 ml-1'>
-              Submitted {formatDate(request.submittedAt)}
+              Submitted {formatDate(request.createdAt || request.submittedAt)}
             </Text>
           </View>
           <View className='flex-row items-center'>
@@ -349,7 +263,7 @@ function CleanupProgress({ onBack = () => {} }) {
 
           <View className='bg-white/20 rounded-2xl p-4'>
             <Text className='text-xs font-bold text-white/80 mb-1'>
-              {selectedRequest.id}
+              {selectedRequest.formattedId || selectedRequest.id}
             </Text>
             <Text className='text-xl font-bold text-white mb-2'>
               {getProblemTypeLabel(selectedRequest.problemType)}
@@ -373,7 +287,7 @@ function CleanupProgress({ onBack = () => {} }) {
               {statusSteps.map((step, index) => {
                 const isCompleted = index <= currentStatusIndex;
                 const isCurrent = index === currentStatusIndex;
-                const update = selectedRequest.updates?.find(u => u.status === step.id);
+                const update = selectedRequest.statusHistory?.find(u => u.status === step.id);
 
                 return (
                   <View key={step.id} className='flex-row mb-6'>
@@ -409,10 +323,10 @@ function CleanupProgress({ onBack = () => {} }) {
                       {update && (
                         <>
                           <Text className='text-sm text-gray-600 mb-1'>
-                            {update.message}
+                            {update.notes || step.description}
                           </Text>
                           <Text className='text-xs text-gray-400'>
-                            {formatDateTime(update.timestamp)}
+                            {formatDateTime(update.changedAt || update.timestamp)}
                           </Text>
                         </>
                       )}
@@ -459,13 +373,13 @@ function CleanupProgress({ onBack = () => {} }) {
                   </View>
                 </View>
 
-                {selectedRequest.assignedTeam && (
+                {selectedRequest.assignedTo && (
                   <View className='flex-1'>
                     <Text className='text-xs font-semibold text-gray-500 mb-1'>
                       ASSIGNED TO
                     </Text>
                     <Text className='text-sm text-gray-800'>
-                      {selectedRequest.assignedTeam}
+                      {selectedRequest.assignedTo}
                     </Text>
                   </View>
                 )}
@@ -492,8 +406,27 @@ function CleanupProgress({ onBack = () => {} }) {
                     "Would you like to contact support about this request?",
                     [
                       { text: "Cancel", style: "cancel" },
-                      { text: "Call", onPress: () => {} },
-                      { text: "Message", onPress: () => {} }
+                      { 
+                        text: "Call", 
+                        onPress: () => {
+                          Alert.alert("Call Support", "Feature coming soon!");
+                        } 
+                      },
+                      { 
+                        text: "Message", 
+                        onPress: async () => {
+                          try {
+                            await ApiService.contactSupportAboutRequest(
+                              selectedRequest._id || selectedRequest.id,
+                              "I need help with this request",
+                              "email"
+                            );
+                            Alert.alert("Success", "Support has been notified!");
+                          } catch (error) {
+                            Alert.alert("Error", error?.userMessage || "Failed to contact support");
+                          }
+                        } 
+                      }
                     ]
                   );
                 }}
@@ -513,6 +446,15 @@ function CleanupProgress({ onBack = () => {} }) {
     return renderDetailedView();
   }
 
+  // Get filter label
+  const getFilterLabel = () => {
+    if (!statusFilter) return 'All Requests';
+    if (statusFilter === 'pending') return 'Pending Requests';
+    if (statusFilter === 'in-progress') return 'In Progress';
+    if (statusFilter === 'completed') return 'Completed Requests';
+    return 'My Requests';
+  };
+
   return (
     <View className='flex-1 bg-gray-50'>
       <View className='bg-green-600 pt-12 pb-6 px-6'>
@@ -521,7 +463,7 @@ function CleanupProgress({ onBack = () => {} }) {
             <Ionicons name='arrow-back' size={24} color='white' />
           </TouchableOpacity>
           <Text className='text-xl font-bold text-white'>
-            My Requests
+            {getFilterLabel()}
           </Text>
           <TouchableOpacity onPress={onRefresh}>
             <Ionicons name='refresh' size={24} color='white' />
@@ -538,11 +480,21 @@ function CleanupProgress({ onBack = () => {} }) {
         <View className='flex-1 items-center justify-center px-6'>
           <Ionicons name='document-text-outline' size={80} color='#D1D5DB' />
           <Text className='text-xl font-bold text-gray-900 mt-4 mb-2'>
-            No Requests Yet
+            No {statusFilter ? statusFilter.replace('-', ' ') : ''} Requests
           </Text>
           <Text className='text-gray-600 text-center'>
-            When you submit cleanup requests, they'll appear here
+            {statusFilter 
+              ? `You don't have any ${statusFilter.replace('-', ' ')} requests yet`
+              : 'When you submit cleanup requests, they\'ll appear here'}
           </Text>
+          {statusFilter && (
+            <TouchableOpacity
+              className='mt-4 bg-green-600 rounded-xl py-3 px-6'
+              onPress={() => setStatusFilter(null)}
+            >
+              <Text className='text-white font-semibold'>View All Requests</Text>
+            </TouchableOpacity>
+          )}
         </View>
       ) : (
         <ScrollView
@@ -560,9 +512,16 @@ function CleanupProgress({ onBack = () => {} }) {
             <Text className='text-sm text-gray-600'>
               {requests.length} {requests.length === 1 ? 'Request' : 'Requests'}
             </Text>
-            <TouchableOpacity className='flex-row items-center'>
-              <Ionicons name='funnel-outline' size={16} color='#6B7280' />
-              <Text className='text-sm text-gray-600 ml-1'>Filter</Text>
+            <TouchableOpacity 
+              className='flex-row items-center'
+              onPress={() => setStatusFilter(null)}
+            >
+              {statusFilter && (
+                <>
+                  <Ionicons name='close-circle' size={16} color='#6B7280' />
+                  <Text className='text-sm text-gray-600 ml-1'>Clear Filter</Text>
+                </>
+              )}
             </TouchableOpacity>
           </View>
 
